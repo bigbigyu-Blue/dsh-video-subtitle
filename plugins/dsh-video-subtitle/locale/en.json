@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Video Subtitle Downloader",
+    "description": "Fetch a Bilibili video's subtitles into a local subtitle file. Tries the official subtitle API, a third-party subtitle site, Bcut speech recognition and local speech recognition in order, and returns only metadata (title, duration, character counts, file paths) — the transcript itself is read on demand by time range."
+  }
+}

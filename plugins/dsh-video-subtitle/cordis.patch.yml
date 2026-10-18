@@ -1,0 +1,52 @@
+# dsh-video-subtitle bundle patch — one insert row over the profile tree.
+# Defaults live here; override any field in profiles/<profile>/cordis.patch.yml
+# (later layers win per row).
+- insert:
+    - id: videosub
+      name: 'dsh-video-subtitle'
+      config:
+        # 总开关
+        enabled: true
+        # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
+        providerOrder: ['native', 'feiyudo', 'bcut', 'local']
+        # 固定字幕落盘目录；留空 = 交给下面的 saveToWorkspace 策略
+        saveDir: ''
+        # true = 写进「发起这次调用的那个会话自己的工作区」，每次调用实时解析会话工作区路径，
+        # 新建的会话/新建的工作区照样生效（不是写死某几个目录）
+        saveToWorkspace: true
+        # 会话工作区里的子目录名；插件落盘时自动创建，不是提前建好的目录
+        workspaceSubdir: '.subtitles'
+        # 语言偏好（按顺序取第一条命中的字幕轨）
+        preferLang: ['zh', 'en']
+        # 单个 provider 的超时（毫秒）
+        timeoutMs: 90000
+        # 第三方字幕站基地址（站点换域名时改这里）
+        feiyudoBaseUrl: 'https://www.feiyudo.com'
+        # 第三方站调用最小间隔（毫秒）——自控频率，防滥用
+        feiyudoMinIntervalMs: 3000
+        # 单次 fetch 内最多打几次第三方站
+        feiyudoMaxPerRun: 5
+        # Bcut ASR 轮询间隔与最大次数
+        bcutPollMs: 3000
+        bcutMaxPolls: 24
+        # Bcut ASR 失败重试次数（每次重新取音频 URL，可能换到别的 CDN 节点）
+        bcutRetries: 2
+        # 重试间隔基准（毫秒；被限流时自动 ×3）
+        bcutRetryDelayMs: 4000
+        # 完整度门槛（百分比）：文稿覆盖不到这个比例就判为失败（残片）
+        fullCoveragePct: 90
+        # 只保留视频原文语种那一条（按标题+简介判断）；false = 保留全部语言轨
+        keepOnlyOriginalLang: true
+        # 本地转写：窗口长度（秒）、线程数、时长上限（分钟）
+        localWindowSec: 30
+        localThreads: 4
+        localMaxMinutes: 240
+        # 多语言轨时，取前多少秒音频判断原文语种（0 = 不探测）
+        localProbeSec: 60
+        # 留空 = 自动查找（ffmpeg 从 imageio-ffmpeg / PATH；sherpa 原生模块从 DSH 安装目录；模型从 <DSH_HOME>/speech-to-text）
+        ffmpegPath: ''
+        sherpaAddonPath: ''
+        senseVoiceModel: ''
+        senseVoiceTokens: ''
+        # 缓存有效期（天）：命中则不发任何请求
+        cacheTtlDays: 30

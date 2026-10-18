@@ -1,0 +1,236 @@
+/**
+ * Provider `whisper` — 本机 faster-whisper 转写，不依赖任何第三方站点、没有次数限制。
+ *
+ * 为什么单独一个源：第三方站每天只放几次，官方源要登录且长视频字幕只覆盖一小段，
+ * 必剪（bcut）对匿名请求限流。本机已经装好 faster-whisper（Python 虚拟环境 + small 模型），
+ * 音频直接用 PyAV 解码，不需要 ffmpeg，是唯一一个「任何视频都能转、且不会用完」的来源。
+ *
+ *   dash audio (anonymous playurl) -> .m4s
+ *     -> python + faster-whisper (CPU int8) -> 分段 JSON -> SRT
+ *
+ * 代价是慢：实测约 1 分钟音频要 7~10 秒，30 分钟视频约 4 分钟。所以它的超时上限
+ * 单独按 whisperTimeoutMs 算（默认 30 分钟），不跟别的源共用 90 秒。
+ */
+import { spawn } from "node:child_process";
+import { promises as fs, existsSync } from "node:fs";
+import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import path from "node:path";
+import os from "node:os";
+import { msToTimestamp } from "../srt.js";
+
+export const id = "whisper";
+const API = "https://api.bilibili.com";
+const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
+
+/** 内嵌的转写脚本：只做「读音频 → 转写 → 写 JSON」三件事，出错就把原因写进 JSON。 */
+const SCRIPT = `
+import json, os, sys
+audio, out, model_name, hf_home, threads, lang = sys.argv[1:7]
+os.environ["HF_HOME"] = hf_home
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+res = {"ok": False, "error": "", "language": "", "duration": 0, "segments": []}
+try:
+    from faster_whisper import WhisperModel
+    m = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=int(threads))
+    kw = {"vad_filter": True, "beam_size": 1, "log_progress": False}
+    # 中文不设提示时 small 模型时常吐繁体；给一句简体提示就能稳定成简体
+    if not lang or lang == "auto" or lang.startswith("zh"):
+        kw["initial_prompt"] = "以下是普通话的句子，用简体中文。"
+    if lang and lang != "auto":
+        kw["language"] = lang
+    segs, info = m.transcribe(audio, **kw)
+    rows = [{"start": float(s.start), "end": float(s.end), "text": s.text.strip()} for s in segs]
+    res["segments"] = [r for r in rows if r["text"]]
+    res["language"] = getattr(info, "language", "") or ""
+    res["duration"] = float(getattr(info, "duration", 0) or 0)
+    res["ok"] = True
+except Exception as e:
+    res["error"] = "%s: %s" % (type(e).__name__, e)
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(res, f, ensure_ascii=False)
+`;
+
+function resolvePaths(cfg) {
+  const bili = path.join(DSH_HOME, "bili-duty");
+  return {
+    python: cfg.whisperPython || process.env.DSH_WHISPER_PYTHON || path.join(bili, ".venv-asr", "Scripts", "python.exe"),
+    hfHome: cfg.whisperHfHome || path.join(bili, ".hf-cache"),
+    model: cfg.whisperModel || "small",
+    threads: Number(cfg.whisperThreads ?? cfg.localThreads ?? 4),
+    // 系统临时目录在受限环境下不可写（mkdtemp 报 EPERM），所以优先用模型缓存旁边
+    // 已经存在的目录；都不可写时再退回系统临时目录。
+    tmpRoot: cfg.whisperTmpDir || process.env.DSH_WHISPER_TMP || path.join(bili, "tmp", "asr"),
+  };
+}
+
+/** 找一个真能建目录的地方当临时工作区，找不到就用系统临时目录（可能失败，但那是环境问题）。 */
+async function makeTmpDir(root) {
+  const candidates = [root, os.tmpdir()].filter(Boolean);
+  let lastErr = null;
+  for (const base of candidates) {
+    try {
+      await fs.mkdir(base, { recursive: true });
+      return await fs.mkdtemp(path.join(base, "vsub-"));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error("找不到可写的临时目录");
+}
+
+/** 本机到底能不能跑：python 在不在、模型缓存有没有。给 providersStatus 用。 */
+export function availability(cfg = {}) {
+  const p = resolvePaths(cfg);
+  const missing = [];
+  if (!existsSync(p.python)) missing.push(`Python 环境（${p.python}）`);
+  if (!existsSync(path.join(p.hfHome, "hub"))) missing.push(`模型缓存（${p.hfHome}）`);
+  if (p.tmpRoot && !existsSync(p.tmpRoot)) missing.push(`临时目录（${p.tmpRoot}）`);
+  return { ready: missing.length === 0, missing };
+}
+
+function runPython(python, args, { timeoutMs, signal, onProgress } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(python, args, { windowsHide: true });
+    let stderr = "";
+    let settled = false;
+    const finish = (fn, v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", onAbort);
+      fn(v);
+    };
+    const kill = () => {
+      try {
+        child.kill();
+      } catch {
+        /* 已退出 */
+      }
+    };
+    const onAbort = () => {
+      kill();
+      finish(reject, new Error("已取消"));
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          kill();
+          finish(reject, new Error(`转写超时（${Math.round(timeoutMs / 1000)} 秒）`));
+        }, timeoutMs)
+      : null;
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+    child.stderr?.on("data", (d) => {
+      stderr += d;
+      if (stderr.length > 4000) stderr = stderr.slice(-4000);
+      onProgress?.(String(d));
+    });
+    child.on("error", (e) => finish(reject, e));
+    child.on("close", (status) => finish(resolve, { status, stderr }));
+  });
+}
+
+function blocksToSrt(blocks) {
+  const lines = [];
+  blocks.forEach((b, i) => {
+    lines.push(String(i + 1));
+    const end = Math.max(b.end, b.start + 0.4);
+    lines.push(`${msToTimestamp(b.start * 1000)} --> ${msToTimestamp(end * 1000)}`);
+    lines.push(b.text.trim());
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+export async function fetchSubtitles({ meta, ctx }) {
+  const p = resolvePaths(ctx.cfg);
+  if (!existsSync(p.python)) {
+    throw ctx.error(id, "UNSUPPORTED", `找不到 Python 环境：${p.python}（配置 whisperPython）`);
+  }
+  if (!existsSync(path.join(p.hfHome, "hub"))) {
+    throw ctx.error(id, "UNSUPPORTED", `找不到模型缓存：${p.hfHome}（配置 whisperHfHome）`);
+  }
+
+  const maxMin = Number(ctx.cfg.whisperMaxMinutes ?? 180);
+  if (meta.durationS && meta.durationS / 60 > maxMin) {
+    throw ctx.error(id, "UNSUPPORTED", `视频 ${(meta.durationS / 60).toFixed(0)} 分钟，超过本地转写上限 ${maxMin} 分钟`);
+  }
+
+  const headers = { Referer: "https://www.bilibili.com/" };
+  const pu = await ctx.request(
+    `${API}/x/player/playurl?bvid=${meta.bvid}&cid=${meta.cid}&fnval=16&qn=64&fourk=1`,
+    { headers, signal: ctx.signal },
+  );
+  const audio = pu?.data?.dash?.audio?.[0];
+  const audioUrl = audio?.baseUrl ?? audio?.base_url;
+  if (!audioUrl) throw ctx.error(id, "AUDIO_UNAVAILABLE", "dash.audio[0] 缺失");
+
+  // 匿名 playurl 对一部分视频只给「试看片段」（实测某 72 分钟视频只给 616 秒音频），
+  // dash.duration 会如实写出这个片段长度。不比对就会把「只转了一小段」当成整段转完。
+  const dashDur = Number(pu?.data?.dash?.duration ?? 0);
+  const fullS = Number(meta.durationS ?? 0);
+  if (dashDur > 0 && fullS > 0 && dashDur < fullS * 0.95) {
+    throw ctx.error(
+      id,
+      "AUDIO_TRUNCATED",
+      `匿名只有试看片段：音频 ${Math.round(dashDur)} 秒，视频 ${Math.round(fullS)} 秒（要完整音频得登录）`,
+    );
+  }
+  let host = "";
+  try {
+    host = new URL(audioUrl).host;
+  } catch {
+    /* ignore */
+  }
+
+  const tmp = await makeTmpDir(p.tmpRoot);
+  const m4s = path.join(tmp, "a.m4s");
+  const script = path.join(tmp, "asr.py");
+  const outJson = path.join(tmp, "out.json");
+  try {
+    const res = await ctx.fetchRaw(audioUrl, { headers, signal: ctx.signal });
+    if (!res.ok) throw ctx.error(id, "AUDIO_UNAVAILABLE", `音频下载 HTTP ${res.status}（主机 ${host}）`);
+    await new Promise((resolve, reject) => {
+      const ws = createWriteStream(m4s);
+      Readable.fromWeb(res.body).pipe(ws);
+      ws.on("finish", resolve);
+      ws.on("error", reject);
+    });
+    await fs.writeFile(script, SCRIPT, "utf8");
+
+    const langArg = String(ctx.cfg.whisperLang || "auto");
+    const timeoutMs = Math.max(60000, Number(ctx.cfg.whisperTimeoutMs ?? 1800000));
+    ctx.log(`[videosub] whisper 开始转写 ${meta.bvid}（模型 ${p.model}，上限 ${Math.round(timeoutMs / 60000)} 分钟）`);
+    const run = await runPython(
+      p.python,
+      [script, m4s, outJson, p.model, p.hfHome, String(p.threads), langArg],
+      { timeoutMs, signal: ctx.signal },
+    );
+    if (!existsSync(outJson)) {
+      throw ctx.error(id, "LOCAL_ASR_FAILED", `转写脚本没有产出结果 status=${run.status} ${String(run.stderr || "").slice(-300)}`);
+    }
+    const parsed = JSON.parse(await fs.readFile(outJson, "utf8"));
+    if (!parsed.ok) throw ctx.error(id, "LOCAL_ASR_FAILED", String(parsed.error || "转写失败").slice(0, 300));
+    const segs = (parsed.segments ?? []).filter((s) => s?.text);
+    if (!segs.length) throw ctx.error(id, "NO_SUBTITLE", "本地转写没有产出文字（音频里可能没有说话声）");
+
+    const lang = String(parsed.language || "und").toLowerCase();
+    const minutes = (Number(parsed.duration || meta.durationS || 0) / 60).toFixed(1);
+    return {
+      source: id,
+      fullAudioProcessed: true,
+      note: `本地 faster-whisper 转写 ${minutes} 分钟音频（模型 ${p.model}）· 音频主机 ${host}`,
+      tracks: [
+        {
+          lang,
+          langDesc: `本地 faster-whisper 转写（${lang}）`,
+          content: blocksToSrt(segs),
+          format: "srt",
+        },
+      ],
+    };
+  } finally {
+    fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+  }
+}

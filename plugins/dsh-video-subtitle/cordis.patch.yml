@@ -8,7 +8,7 @@
         # 总开关
         enabled: true
         # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
-        providerOrder: ['native', 'feiyudo', 'bcut', 'local']
+        providerOrder: ['native', 'feiyudo', 'whisper', 'local']
         # 固定字幕落盘目录；留空 = 交给下面的 saveToWorkspace 策略
         saveDir: ''
         # true = 写进「发起这次调用的那个会话自己的工作区」，每次调用实时解析会话工作区路径，
@@ -24,15 +24,23 @@
         feiyudoBaseUrl: 'https://www.feiyudo.com'
         # 第三方站调用最小间隔（毫秒）——自控频率，防滥用
         feiyudoMinIntervalMs: 3000
-        # 单次 fetch 内最多打几次第三方站
-        feiyudoMaxPerRun: 5
-        # Bcut ASR 轮询间隔与最大次数
-        bcutPollMs: 3000
-        bcutMaxPolls: 24
-        # Bcut ASR 失败重试次数（每次重新取音频 URL，可能换到别的 CDN 节点）
-        bcutRetries: 2
-        # 重试间隔基准（毫秒；被限流时自动 ×3）
-        bcutRetryDelayMs: 4000
+        # 第三方站每天最多取几条（0 = 不自己限制，完全听站点的）。跨天自动归零，
+        # 站点自己回「今日次数已达上限」时当天不再白打请求
+        feiyudoDailyMax: 20
+        # 本机 faster-whisper 转写（不依赖第三方、无次数限制，代价是慢）
+        # python 环境与模型缓存留空 = 自动找 <DSH_HOME>/bili-duty 下现成的那套
+        whisperPython: ''
+        whisperHfHome: ''
+        # 转写临时文件放哪；留空自动用 <DSH_HOME>/bili-duty/tmp/asr（系统临时目录在受限环境下不可写）
+        whisperTmpDir: ''
+        whisperModel: 'small'
+        whisperThreads: 4
+        # auto = 让模型自己判断语种；也可写 zh / en / ja
+        whisperLang: 'auto'
+        # 单个视频转写的时间上限（毫秒，默认 30 分钟）
+        whisperTimeoutMs: 1800000
+        # 超过这个时长的视频不做本地转写（分钟）
+        whisperMaxMinutes: 180
         # 完整度门槛（百分比）：文稿覆盖不到这个比例就判为失败（残片）
         fullCoveragePct: 90
         # 只保留视频原文语种那一条（按标题+简介判断）；false = 保留全部语言轨

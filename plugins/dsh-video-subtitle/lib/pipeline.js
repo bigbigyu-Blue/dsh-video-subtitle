@@ -13,8 +13,8 @@ import { parseVideoInput, resolveShortLink, resolveBilibiliMeta } from "./ids.js
 import { readSlice, srtStats, langSlug, langMatches, detectScriptLang, timelineIssues } from "./srt.js";
 import * as nativeProvider from "./providers/native.js";
 import * as feiyudoProvider from "./providers/feiyudo.js";
-import * as bcutProvider from "./providers/bcut.js";
 import * as localProvider from "./providers/local.js";
+import * as whisperProvider from "./providers/whisper.js";
 import { probeLanguage } from "./providers/local.js";
 
 const UA =
@@ -23,7 +23,7 @@ const UA =
 export const PROVIDERS = {
   native: nativeProvider,
   feiyudo: feiyudoProvider,
-  bcut: bcutProvider,
+  whisper: whisperProvider,
   local: localProvider,
 };
 
@@ -284,11 +284,13 @@ function inflightKey({ url, lang, dir, force = false, cfg = {} }) {
  */
 export function fetchTimeoutBudget(cfg = {}) {
   const per = Math.max(1000, Number(cfg.timeoutMs ?? 90000));
-  const count = Math.max(
-    1,
-    (cfg.providerOrder ?? Object.keys(PROVIDERS)).filter((p) => typeof PROVIDERS[p]?.fetchSubtitles === "function").length,
+  const order = (cfg.providerOrder ?? Object.keys(PROVIDERS)).filter(
+    (p) => typeof PROVIDERS[p]?.fetchSubtitles === "function",
   );
-  return 30000 + per * count + 15000; // 取视频信息 30s + 每个源各一份 + 落盘余量 15s
+  const count = Math.max(1, order.length);
+  // whisper 是整段音频转写，一个源就要几十分钟，不能按 90 秒算，否则工具会先超时、白等。
+  const whisperMs = order.includes("whisper") ? Math.max(60000, Number(cfg.whisperTimeoutMs ?? 1800000)) : 0;
+  return 30000 + per * count + whisperMs + 15000; // 取视频信息 30s + 每个源各一份 + whisper 单独一份 + 落盘余量 15s
 }
 
 async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, signal, log = () => {}, workspaceRoot = "" }) {
@@ -358,7 +360,12 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
   for (const pid of order) {
     const t0 = Date.now();
     try {
-      const res = await runProvider(PROVIDERS[pid], meta, ctx, Number(cfg.timeoutMs ?? 90000));
+      // whisper 是整段音频转写，按 timeoutMs（默认 90 秒）算必然被掐断，单独给它 whisperTimeoutMs
+      const perTimeout =
+        pid === "whisper"
+          ? Math.max(60000, Number(cfg.whisperTimeoutMs ?? 1800000))
+          : Number(cfg.timeoutMs ?? 90000);
+      const res = await runProvider(PROVIDERS[pid], meta, ctx, perTimeout);
       const tracks = (res?.tracks ?? []).filter((t) => t?.content && String(t.content).trim().length > 0);
       if (!tracks.length) {
         attempts.push({ provider: pid, result: "EMPTY", detail: "provider 返回空字幕", ms: Date.now() - t0 });
@@ -513,9 +520,11 @@ export function providersStatus(cfg = {}) {
     const p = PROVIDERS[pid];
     let placeholder = null;
     let missing = null;
-    if (pid === "local" && typeof localProvider.availability === "function") {
+    let note = null;
+    const checker = pid === "local" ? localProvider : pid === "whisper" ? whisperProvider : null;
+    if (checker && typeof checker.availability === "function") {
       try {
-        const av = localProvider.availability(cfg);
+        const av = checker.availability(cfg);
         if (!av.ready) {
           missing = av.missing;
           placeholder = `本机缺：${av.missing.join("、")}`;
@@ -524,11 +533,19 @@ export function providersStatus(cfg = {}) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;
       }
     }
+    if (pid === "feiyudo" && typeof feiyudoProvider.quotaStatus === "function") {
+      try {
+        note = feiyudoProvider.quotaStatus(cfg).detail;
+      } catch {
+        /* 额度说明拿不到不影响状态清单 */
+      }
+    }
     return {
       provider: pid,
       wired: typeof p.fetchSubtitles === "function",
       placeholder,
       missing,
+      note,
       lastResult: a?.result ?? null,
       lastDetail: a?.detail ?? null,
       lastAt: a?.at ?? null,

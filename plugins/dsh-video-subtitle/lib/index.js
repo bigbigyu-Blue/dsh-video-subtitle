@@ -28,7 +28,7 @@ const inject = ["tools", "systemPrompt"];
 /** Deployment-tunable config, filled by the loader from the patch row. */
 const Config = z.object({
   enabled: z.boolean().default(true),
-  providerOrder: z.array(z.string()).default(["native", "feiyudo", "bcut", "local"]),
+  providerOrder: z.array(z.string()).default(["native", "feiyudo", "whisper", "local"]),
   saveDir: z.string().default(""),
   saveToWorkspace: z.boolean().default(true),
   workspaceSubdir: z.string().default(".subtitles"),
@@ -36,11 +36,16 @@ const Config = z.object({
   timeoutMs: z.number().default(90000),
   feiyudoBaseUrl: z.string().default("https://www.feiyudo.com"),
   feiyudoMinIntervalMs: z.number().default(3000),
-  feiyudoMaxPerRun: z.number().default(5),
-  bcutPollMs: z.number().default(3000),
-  bcutMaxPolls: z.number().default(24),
-  bcutRetries: z.number().default(2),
-  bcutRetryDelayMs: z.number().default(4000),
+  feiyudoDailyMax: z.number().default(20),
+  // 本机 faster-whisper 转写（无第三方、无次数限制，代价是慢）
+  whisperPython: z.string().default(""),
+  whisperHfHome: z.string().default(""),
+  whisperTmpDir: z.string().default(""),
+  whisperModel: z.string().default("small"),
+  whisperThreads: z.number().default(4),
+  whisperLang: z.string().default("auto"),
+  whisperTimeoutMs: z.number().default(1800000),
+  whisperMaxMinutes: z.number().default(180),
   fullCoveragePct: z.number().default(90),
   keepOnlyOriginalLang: z.boolean().default(true),
   localWindowSec: z.number().default(30),
@@ -61,7 +66,7 @@ const SYSTEM_PROMPT = [
   "【读正文】subtitle_read(path, from, to, max_chars)：按时间区间分段读。20 分钟视频约 2.5 万字，禁止一次整篇读。",
   "【失败处理】subtitle_fetch 返回 ok:false 时，把 attempts[] 里每个 provider 的原因如实转述，不要编造字幕内容，不要改用别的视频替代，也不要声称已获取。",
   "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（第三方站点改版、抽签失败在这里一眼可见）。",
-  "provider 顺序默认 native→feiyudo→bcut→local，在 profile 的 cordis.patch.yml 里可改；第三方站换域名改 feiyudoBaseUrl。",
+  "provider 顺序默认 native→feiyudo→whisper→local，在 profile 的 cordis.patch.yml 里可改；第三方站换域名改 feiyudoBaseUrl。whisper 是本机转写，任何视频都能转但慢（约每分钟音频 8 秒），没有次数限制。",
 ].join("\n");
 
 function clampInt(v, dflt, min, max) {
@@ -136,7 +141,8 @@ function fmtStatus(v) {
   );
   for (const p of v.providers ?? []) {
     const last = p.lastResult ? `最近一次：${p.lastResult}${p.lastDetail ? ` — ${p.lastDetail}` : ""} @ ${p.lastAt}` : "最近一次：本进程内未调用";
-    lines.push(`- ${p.provider}${p.wired ? "" : "（未接线）"}${p.placeholder ? `（${p.placeholder}）` : ""}：${last}`);
+    const extra = p.placeholder ? `（${p.placeholder}）` : p.note ? `（${p.note}）` : "";
+    lines.push(`- ${p.provider}${p.wired ? "" : "（未接线）"}${extra}：${last}`);
   }
   return lines.join("\n");
 }
@@ -159,7 +165,7 @@ function apply(ctx, config) {
       name: "subtitle_fetch",
       description:
         "Fetch a video's subtitles into a local .srt file through a fallback provider chain " +
-        "(bilibili native API -> third-party extractor -> Bcut anonymous ASR -> local ASR). " +
+        "(bilibili native API -> third-party extractor -> local faster-whisper ASR -> local SenseVoice ASR). " +
         "Returns metadata only (title, duration, per-track character counts, absolute file paths); the " +
         "transcript text is NOT returned — read it on demand with subtitle_read. A result counts as success " +
         "only when the transcript covers at least fullCoveragePct (default 90%) of the video; anything shorter " +

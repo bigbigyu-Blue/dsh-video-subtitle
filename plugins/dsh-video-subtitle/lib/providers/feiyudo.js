@@ -23,7 +23,22 @@ const IV_B64 = "a2Vkb3VAODk4OSE2MzIzMw==";
 
 let keys = null; // { aesKey, publicKey, fetchedAt }
 let lastCallAt = 0;
-let callsThisRun = 0; // 本进程内已向该站发起的取字幕次数，用于 feiyudoMaxPerRun 上限
+
+/**
+ * 该站是「按天」限流的：同一天里取够几次就回 500「您今日的使用次数已达上限，请明天再试！」。
+ * 以前这里是个只增不减的进程级计数器，取满就永久拒绝，必须重启整个 DSH 才能恢复——那是 bug。
+ * 现在记「日期 + 当日次数 + 站点是否已明确说今日用完」，跨天自动归零。
+ */
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
+let quota = { day: todayKey(), count: 0, siteExhausted: false, siteMessage: "" };
+
+function quotaState() {
+  if (quota.day !== todayKey()) quota = { day: todayKey(), count: 0, siteExhausted: false, siteMessage: "" };
+  return quota;
+}
 
 const baseOf = (cfg) => String(cfg.feiyudoBaseUrl || "https://www.feiyudo.com").replace(/\/+$/, "");
 const headersOf = (base) => ({
@@ -47,12 +62,17 @@ async function loadKeys(ctx) {
 export async function fetchSubtitles({ meta, ctx }) {
   const base = baseOf(ctx.cfg);
 
-  // feiyudoMaxPerRun：本进程内最多取几条，取够就拒绝，让字幕链转去试下一个 provider
-  const maxPerRun = Number(ctx.cfg.feiyudoMaxPerRun ?? 5);
-  if (maxPerRun > 0 && callsThisRun >= maxPerRun) {
-    throw ctx.error(id, "QUOTA", `本次运行已取 ${callsThisRun} 条，达到 feiyudoMaxPerRun=${maxPerRun} 上限`);
+  // 每天最多取几条（feiyudoDailyMax，0 = 不自己限制，完全交给站点）。跨天自动归零，
+  // 站点自己说今日用完了也记下来，当天不再白打请求。
+  const st = quotaState();
+  const dailyMax = Number(ctx.cfg.feiyudoDailyMax ?? 20);
+  if (st.siteExhausted) {
+    throw ctx.error(id, "QUOTA", `站点今日额度已用完（${st.siteMessage || "您今日的使用次数已达上限"}），明天自动恢复`);
   }
-  callsThisRun += 1;
+  if (dailyMax > 0 && st.count >= dailyMax) {
+    throw ctx.error(id, "QUOTA", `今日已取 ${st.count} 条，达到 feiyudoDailyMax=${dailyMax} 上限，明天自动恢复`);
+  }
+  st.count += 1;
 
   // self-imposed rate limit — never hammer their service
   const wait = Math.max(0, Number(ctx.cfg.feiyudoMinIntervalMs ?? 3000) - (Date.now() - lastCallAt));
@@ -84,9 +104,17 @@ export async function fetchSubtitles({ meta, ctx }) {
     if (!json) throw ctx.error(id, "NETWORK", `HTTP ${res.status} 响应不是 JSON`);
 
     if (json.code === 530 || json.code === 500) {
+      // 站点说「今日次数已达上限」时不是握手问题，重试也没用，直接记下来当天不再打
+      const msg = String(json.message ?? "");
+      if (/次数|上限|quota|limit/i.test(msg)) {
+        const s2 = quotaState();
+        s2.siteExhausted = true;
+        s2.siteMessage = msg;
+        throw ctx.error(id, "QUOTA", `站点回复：${msg}`);
+      }
       // handshake / key may be stale — refresh once and retry
       keys = null;
-      lastErr = ctx.error(id, "BLOCKED", `code=${json.code} ${json.message ?? ""}`);
+      lastErr = ctx.error(id, "BLOCKED", `code=${json.code} ${msg}`);
       if (attempt === 0) continue;
       throw lastErr;
     }
@@ -105,4 +133,21 @@ export async function fetchSubtitles({ meta, ctx }) {
     };
   }
   throw lastErr ?? ctx.error(id, "BLOCKED", "未知失败");
+}
+
+/** 给 providersStatus 看：今天用了多少、站点是否已说用完。 */
+export function quotaStatus(cfg = {}) {
+  const st = quotaState();
+  const dailyMax = Number(cfg.feiyudoDailyMax ?? 20);
+  return {
+    day: st.day,
+    used: st.count,
+    dailyMax,
+    siteExhausted: st.siteExhausted,
+    detail: st.siteExhausted
+      ? `今日额度已用完（${st.siteMessage || "站点提示次数已达上限"}），明天自动恢复`
+      : dailyMax > 0
+        ? `今日已取 ${st.count}/${dailyMax} 条`
+        : `今日已取 ${st.count} 条（未设上限）`,
+  };
 }

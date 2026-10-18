@@ -349,8 +349,8 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
 
   const order = (cfg.providerOrder ?? []).filter((p) => typeof PROVIDERS[p]?.fetchSubtitles === "function");
   const attempts = [];
-  // 完整度门槛：只有覆盖到视频的这个比例，结果才算"取到字幕"。
-  // 低于门槛的文稿照样写文件（不丢东西），但结果判为失败，绝不当作可用文稿。
+  // 完整度门槛：只有覆盖到视频的这个比例，结果才算「取到字幕」。
+  // 低于门槛的残片不写盘、不缓存，结果判为失败并如实写明覆盖了多少，绝不当作可用文稿。
   const fullPct = Number(cfg.fullCoveragePct ?? 90);
   const prefer = lang ? [lang] : cfg.preferLang ?? [];
   let best = null; // { pid, tracks, picked, coverage, note }

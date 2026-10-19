@@ -51,6 +51,8 @@
         whisperTimeoutMs: 1800000
         # 超过这个时长的视频不做本地转写（分钟）
         whisperMaxMinutes: 180
+        # 转写进程常驻复用：模型只加载一次，连着取多条时后面的明显更快；false = 每条新开进程（排障对比用）
+        whisperReuseModel: true
         # 完整度门槛（百分比）：文稿覆盖不到这个比例就判为失败（残片）
         fullCoveragePct: 90
         # 只保留视频原文语种那一条（按标题+简介判断）；false = 保留全部语言轨

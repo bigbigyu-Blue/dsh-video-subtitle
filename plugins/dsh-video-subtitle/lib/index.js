@@ -73,6 +73,8 @@ const Config = z.object({
   whisperLang: z.string().default("auto"),
   whisperTimeoutMs: z.number().default(1800000),
   whisperMaxMinutes: z.number().default(180),
+  // 转写进程常驻复用：模型只加载一次，连着取多条时后面的明显更快；关掉则每条新开进程（排障对比用）
+  whisperReuseModel: z.boolean().default(true),
   fullCoveragePct: z.number().default(90),
   keepOnlyOriginalLang: z.boolean().default(true),
   localWindowSec: z.number().default(30),

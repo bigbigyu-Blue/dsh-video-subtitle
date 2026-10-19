@@ -1,6 +1,6 @@
 {
   "name": "dsh-video-subtitle",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "DeepSeek Harness tool plugin: fetch video subtitles (Bilibili first) into local .srt files through a fallback provider chain — official subtitle API with login + WBI signature, local faster-whisper ASR, local SenseVoice ASR. Batch fetch, 分P expansion, sentence reassembly into a plain transcript.",
   "type": "module",
   "main": "lib/index.js",

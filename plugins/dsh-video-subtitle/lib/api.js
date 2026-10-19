@@ -7,14 +7,13 @@
  *
  * 这里只做四类事：报状态、扫码登录、装转写环境、读写设置。字幕正文一律不经过这里。
  */
-import { loadCredential } from "./bili-credential.js";
+import { loadCredential, clearCredentials } from "./bili-credential.js";
 import {
   startLogin,
   pollLogin,
   fetchNav,
   saveCredential,
   readSaved,
-  clearCredential,
   loginFile,
 } from "./bili-login.js";
 import { toSvg } from "./qr.js";
@@ -172,8 +171,19 @@ export function registerApiRoutes(ctx, { getCfg, version = "" } = {}) {
 
   add("POST", `${PREFIX}/login/logout`, async (req, res) => {
     try {
-      clearCredential({});
-      sendJson(res, 200, { ok: true });
+      const r = clearCredentials(config());
+      const notes = [];
+      if (r.removed.length) notes.push(`已经退出登录，清掉了 ${r.removed.length} 处登录信息`);
+      else notes.push("已经是未登录状态，没有找到要清掉的登录信息");
+      if (r.failed.length) notes.push(`有 ${r.failed.length} 处登录信息删不掉：${r.failed.map((f) => `${f.label}（${f.error}）`).join("、")}，请手动删掉这个文件`);
+      if (r.inline) notes.push("插件配置里直接写死了一条 Cookie，界面上删不掉，要修改插件配置文件才能去掉");
+      sendJson(res, 200, {
+        ok: r.failed.length === 0,
+        removed: r.removed,
+        message: notes.join("；"),
+        error: r.failed.length ? `退出登录没做完：${notes.join("；")}` : undefined,
+        stillLoggedIn: r.inline,
+      });
     } catch (e) {
       sendJson(res, 200, { ok: false, error: `退出登录失败：${e?.message ?? e}` });
     }

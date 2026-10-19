@@ -109,7 +109,7 @@ batchMaxItems: 20             # 批量单次最多跑几条；截掉的条数会
 | `/api/video-subtitle/status` | GET | 一次报齐：登录状态、转写环境四步体检、几个字幕源的状况、当前设置、几处目录、安装提示 |
 | `/api/video-subtitle/login/qr` | GET | 生成登录二维码，回二维码标识、SVG 图和过期时间 |
 | `/api/video-subtitle/login/poll` | GET | 拿二维码标识查扫码结果；成功时顺手把凭据存好 |
-| `/api/video-subtitle/login/logout` | POST | 删掉设置页存下的凭据 |
+| `/api/video-subtitle/login/logout` | POST | 退出登录：把扫码登录存的凭据、旧的历史凭据文件、配置里指定的凭据文件一起删掉，回一句说清了删了几处的话 |
 | `/api/video-subtitle/asr/setup` | POST | 开始一键安装转写环境，立刻返回任务号 |
 | `/api/video-subtitle/asr/state` | GET | 读安装进度：当前第几步、每步状态、日志 |
 | `/api/video-subtitle/asr/cancel` | POST | 停掉正在跑的安装 |
@@ -130,12 +130,12 @@ cordis.patch.yml            dsh.bundle.patch 指向；默认配置
 locale/zh.json              设置页显示的中文名与说明
 locale/en.json              英文名与说明
 icon.svg                    设置页图标（原创）
-test/*.test.js              自动测试（node --test，122 项）
+test/*.test.js              自动测试（node --test，130 项）
 lib/pipeline.js             provider 链调度、缓存、写文件、read/status/polish
 lib/ids.js                  URL/BV/av/b23.tv/分P 解析、view 接口取 cid
 lib/srt.js                  utterances→SRT、容错解析、区间切片、语种比对
 lib/wbi.js                  B站 WBI 签名（mixinKey、w_rid、key 缓存）
-lib/bili-credential.js      本机登录凭据读取与字段映射（只读取，不回写）
+lib/bili-credential.js      本机登录凭据读取与字段映射，以及退出登录时按来源逐个删干净
 lib/batch.js                批量/合集分P展开与逐条抓取
 lib/text-format.js          碎片并句、补标点、纯文稿
 lib/providers/native.js     官方字幕轨（匿名 + 登录签名）
@@ -149,7 +149,7 @@ lib/providers/local.js      本机 SenseVoice 转写（ffmpeg 异步解码 + she
 npm test
 ```
 
-122 项自动测试：编号解析（BV/av/分P/短链/别站误吃）、字幕解析与时间轴校验、区间读取与超长单句截断、语种按整词比对、等待上限随源数量变化（含 whisper 单独留出转写时间）、本地源缺件说明、子进程超时/取消/并行、WBI 签名（key 提取、mixinKey 重排、w_rid 等于 query 拼 key 的 md5、参数顺序无关、五个字符剥离）、native 的四种身份组合（匿名有轨/匿名无轨转签名/无凭据/凭据过期）与坏轨跳过、批量解析与逐条容错、碎片并句与补标点、词级切条，以及这次新加的几块：扫码登录（二维码地址与过期时间、五种扫码状态、Cookie 拼接、成功与失败时的错误文字都不许带凭据）、二维码逐格比对（自己算的点阵跟参照包比、格式信息与版本信息写对、四种纠错等级）、转写环境四步体检（解释器/依赖包/模型/临时目录，老环境复用与正式位置、装到一半失败、同一时间只跑一个任务、日志里抹掉用户名与 token）、批量与设置页那几块，以及插件清单本身（声明了客户端一半、指向的文件真实存在、客户端里除了平台的 react 不许有别的依赖、版本号只写在清单一处）。全部是本地跑、不联网。
+130 项自动测试：编号解析（BV/av/分P/短链/别站误吃）、字幕解析与时间轴校验、区间读取与超长单句截断、语种按整词比对、等待上限随源数量变化（含 whisper 单独留出转写时间）、本地源缺件说明、子进程超时/取消/并行、WBI 签名（key 提取、mixinKey 重排、w_rid 等于 query 拼 key 的 md5、参数顺序无关、五个字符剥离）、native 的四种身份组合（匿名有轨/匿名无轨转签名/无凭据/凭据过期）与坏轨跳过、批量解析与逐条容错、碎片并句与补标点、词级切条，以及这次新加的几块：扫码登录（二维码地址与过期时间、五种扫码状态、Cookie 拼接、成功与失败时的错误文字都不许带凭据）、二维码逐格比对（自己算的点阵跟参照包比、格式信息与版本信息写对、四种纠错等级）、转写环境四步体检（解释器/依赖包/模型/临时目录，老环境复用与正式位置、装到一半失败、同一时间只跑一个任务、日志里抹掉用户名与 token）、批量与设置页那几块、退出登录（场景是只剩旧凭据文件时也必须真的退出、配置里写死的 Cookie 删不掉要说明、重复点退出不报错）、以及插件清单本身（声明了客户端一半、指向的文件真实存在、客户端里除了平台的 react 不许有别的依赖、版本号只写在清单一处）。全部是本地跑、不联网。
 
 写出来的文件名：`<bvid>[-pN].<lang>.<provider>.srt`，同目录另写 `<bvid>.meta.json`（本次 provider 链逐项结果）。
 

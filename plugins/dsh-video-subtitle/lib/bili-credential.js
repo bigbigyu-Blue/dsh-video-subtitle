@@ -13,7 +13,7 @@
  * 凭据文件格式（字段名大小写都认）：
  *   { "sessdata": "...", "bili_jct": "...", "buvid3": "...", "dedeuserid": "..." }
  */
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -98,6 +98,39 @@ export function loadCredential(cfg = {}) {
     source: "",
     detail: "还没有登录 B站。到「设置 → 视频字幕」里点一下扫码登录，官方字幕才会返回地址。",
   };
+}
+
+/**
+ * 退出登录：把能找到的凭据文件全部删掉。
+ *
+ * 只删一个文件是不够的 —— 老用户的历史凭据文件还在时，删掉扫码登录那份，
+ * 下一次读凭据又会回落到历史文件，界面上看起来就是「点了没反应」。
+ *
+ * @returns {{removed:string[], failed:{label:string,error:string}[], inline:boolean}}
+ *   removed 是删掉的来源说明，failed 是删不掉的，inline 表示配置里写死了 Cookie（界面上删不掉，只能改配置文件）。
+ */
+export function clearCredentials(cfg = {}) {
+  const targets = [];
+  const explicit = String(cfg.biliCredentialFile ?? "").trim();
+  if (explicit) targets.push({ file: explicit, label: "配置里指定的登录凭据文件" });
+  targets.push({ file: loginCredentialFile(), label: "设置页扫码登录的凭据" });
+  targets.push({ file: defaultCredentialFile(), label: "历史凭据文件" });
+
+  const removed = [];
+  const failed = [];
+  for (const { file, label } of targets) {
+    try {
+      if (!existsSync(file)) continue;
+      rmSync(file, { force: true });
+      removed.push(label);
+    } catch (e) {
+      failed.push({ label, error: String(e?.message ?? e) });
+    }
+  }
+
+  Object.assign(cache, { file: "", mtimeMs: 0, cookie: "", source: "", detail: "" });
+  const inline = Boolean(String(cfg.biliCookie ?? "").trim());
+  return { removed, failed, inline };
 }
 
 export { UA };

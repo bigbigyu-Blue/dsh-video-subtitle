@@ -180,6 +180,7 @@ window.__ModuleLoader__.load({
       const [asr, setAsr] = react.useState(null);
       const [draft, setDraft] = react.useState({});
       const [savedTip, setSavedTip] = react.useState("");
+      const [loginTip, setLoginTip] = react.useState("");
 
       const load = react.useCallback(async () => {
         try {
@@ -245,6 +246,22 @@ window.__ModuleLoader__.load({
         }
       };
 
+      // 退出登录：把所有来源的凭据文件都删掉，并且不管成功失败都要让用户看见结果
+      const logout = async () => {
+        setBusy("logout");
+        setLoginTip("");
+        try {
+          const r = await call("/login/logout", { method: "POST", body: {} });
+          setLoginTip(r.ok ? textOf(r.message, "已经退出登录") : textOf(r.error, "退出登录没做完"));
+          await load();
+        } catch (e) {
+          setLoginTip("退出登录失败：" + e.message);
+        } finally {
+          setBusy("");
+          setTimeout(() => setLoginTip(""), 8000);
+        }
+      };
+
       const startSetup = async () => {
         setBusy("asr");
         try {
@@ -295,15 +312,8 @@ window.__ModuleLoader__.load({
             h("button", { className: "vsub-btn " + (login && login.loggedIn ? "" : "primary"), onClick: () => setShowLogin(true), disabled: busy === "login" },
               login && login.loggedIn ? "换一个账号" : "扫码登录"),
             login && login.loggedIn
-              ? h("button", { className: "vsub-btn", onClick: async () => {
-                  setBusy("login");
-                  try {
-                    await call("/login/logout", { method: "POST", body: {} });
-                    await load();
-                  } finally {
-                    setBusy("");
-                  }
-                } }, "退出登录")
+              ? h("button", { className: "vsub-btn", onClick: logout, disabled: busy === "logout" },
+                  busy === "logout" ? "正在退出…" : "退出登录")
               : null,
           ),
           h("p", { className: "vsub-muted" },
@@ -311,6 +321,7 @@ window.__ModuleLoader__.load({
               ? "登录后能拿到官方 AI 字幕，通常是秒级返回，而且不用本机转写，又快又准。"
               : "不登录也能取到一部分公开字幕，但官方 AI 字幕必须登录。点上面的按钮，用手机 B站 扫一下就成。"),
           login && !login.loggedIn && login.detail ? h("p", { className: "vsub-muted", style: { fontSize: 12 } }, login.detail) : null,
+          loginTip ? h("p", { className: "vsub-muted", style: { fontSize: 12, color: "#0f766e" } }, loginTip) : null,
         ),
 
         // 2. 转写环境

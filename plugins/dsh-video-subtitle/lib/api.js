@@ -118,6 +118,7 @@ export function registerApiRoutes(ctx, { getCfg, version = "" } = {}) {
     const providers = providersStatus(cfg).map((p) => ({
       provider: p.provider,
       wired: p.wired,
+      optional: p.optional === true,
       placeholder: p.placeholder ?? null,
       missing: p.missing ?? null,
       note: p.note ?? null,

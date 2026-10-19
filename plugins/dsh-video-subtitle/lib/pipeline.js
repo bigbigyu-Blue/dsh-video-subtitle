@@ -553,7 +553,10 @@ export function providersStatus(cfg = {}) {
           if (pid === "native") note = av.detail;
         } else {
           missing = av.missing;
-          placeholder = pid === "local" ? `本机缺：${av.missing.join("、")}` : `未就绪：缺少${av.missing.join("、")}`;
+          // local 是可选的第四条路：官方字幕加本机转写已经够用，它缺件不算故障，别让它红着吓人。
+          placeholder = pid === "local"
+            ? `需要额外安装，默认不用（缺 ${av.missing.join("、")}）`
+            : `未就绪：缺少${av.missing.join("、")}`;
         }
       } catch (e) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;
@@ -562,6 +565,7 @@ export function providersStatus(cfg = {}) {
     return {
       provider: pid,
       wired: typeof p.fetchSubtitles === "function",
+      optional: pid === "local",
       placeholder,
       missing,
       note,

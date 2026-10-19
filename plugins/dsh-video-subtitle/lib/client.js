@@ -44,6 +44,8 @@ window.__ModuleLoader__.load({
       ".vsub-badge{font-size:12px;border-radius:999px;padding:2px 9px;border:1px solid var(--dsw-alias-border-secondary,rgba(127,127,127,.3))}",
       ".vsub-badge.ok{color:#16a34a;border-color:#16a34a55}",
       ".vsub-badge.bad{color:#dc2626;border-color:#dc262655}",
+      ".vsub-card.next{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}",
+      ".vsub-next{font-size:12px;color:#3b82f6;border:1px solid #3b82f655;border-radius:999px;padding:1px 8px}",
       ".vsub-field{display:grid;grid-template-columns:170px 1fr;gap:10px;align-items:center;font-size:13px}",
       ".vsub-field input[type=text],.vsub-field input[type=number],.vsub-field select{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-secondary,rgba(127,127,127,.35));background:transparent;color:inherit;font-size:13px}",
       ".vsub-log{max-height:220px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;background:rgba(127,127,127,.08);border-radius:8px;padding:10px}",
@@ -289,6 +291,14 @@ window.__ModuleLoader__.load({
       const asrReady = status && status.asr ? status.asr.ready : false;
       const asrSteps = (asr && asr.steps) || (status && status.asr && status.asr.steps) || [];
 
+      // 来源的名字写成中文，第四路是可选的，别让人以为哪里坏了
+      const sourceName = (id) => ({ native: "官方字幕", feiyudo: "第三方字幕站", whisper: "本机转写", local: "本机识别（可选）" })[id] || id;
+
+      // 下一步该做什么：没登录就先登录，登录了再看转写环境。做到的卡片高亮，用户从上往下点不会点错。
+      const nextStep = !login ? "" : !login.loggedIn ? "login" : !asrReady ? "asr" : "done";
+      const cardCls = (key) => "vsub-card" + (nextStep === key ? " next" : "");
+      const nextTag = (key) => (nextStep === key ? h("span", { className: "vsub-next" }, "先做这个") : null);
+
       return h(
         "div",
         { className: "vsub-root" },
@@ -300,11 +310,12 @@ window.__ModuleLoader__.load({
         // 1. 登录
         h(
           "div",
-          { className: "vsub-card" },
+          { className: cardCls("login") },
           h(
             "div",
             { className: "vsub-row" },
             h("h3", null, "B站 登录"),
+            nextTag("login"),
             h("span", { className: "vsub-badge " + (login && login.loggedIn ? "ok" : "bad") },
               login && login.loggedIn ? "已登录" : "未登录"),
             login && login.loggedIn && login.uname ? h("span", { className: "vsub-muted" }, login.uname) : null,
@@ -327,11 +338,12 @@ window.__ModuleLoader__.load({
         // 2. 转写环境
         h(
           "div",
-          { className: "vsub-card" },
+          { className: cardCls("asr") },
           h(
             "div",
             { className: "vsub-row" },
             h("h3", null, "本机转写"),
+            nextTag("asr"),
             h("span", { className: "vsub-badge " + (asrReady ? "ok" : "bad") }, asrReady ? "已就绪" : "缺东西"),
             h("span", { style: { flex: 1 } }),
             running
@@ -360,8 +372,8 @@ window.__ModuleLoader__.load({
             h("button", { className: "vsub-btn", onClick: load }, "刷新")),
           h("p", { className: "vsub-muted" }, "按顺序试，前一个拿不到才轮到下一个。"),
           h("ul", { className: "vsub-muted", style: { margin: 0, paddingLeft: 20 } },
-            ((status && status.providers) || []).map((p) => h("li", { key: p.provider },
-              p.provider + (p.wired ? "" : "（未接线）") + "：" +
+            ((status && status.providers) || []).map((p) => h("li", { key: p.provider, style: p.optional ? { opacity: 0.6 } : null },
+              sourceName(p.provider) + (p.wired ? "" : "（未接线）") + "：" +
               (p.placeholder || p.note || "可用")))),
         ),
 

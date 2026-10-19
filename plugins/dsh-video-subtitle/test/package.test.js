@@ -30,6 +30,23 @@ test("客户端文件用的是宿主认的那种写法", () => {
   assert.deepEqual(requires, ["react"]);
 });
 
+test("设置页会把该先做的那张卡片挑出来高亮", () => {
+  const code = readFileSync(join(root, pkg.exports["./client"]), "utf8");
+  // 一张卡片都不高亮，新用户就得自己想先点哪；挑错就会把人引到还用不上的那一步
+  assert.match(code, /nextStep\s*=/, "必须有算出下一步该做什么的那段");
+  assert.match(code, /!login\.loggedIn\s*\?\s*"login"/, "没登录时先引导去登录");
+  assert.match(code, /!asrReady\s*\?\s*"asr"/, "登录后没装好转写环境就引导去装");
+  assert.match(code, /cardCls\("login"\)/, "登录卡片要能被高亮");
+  assert.match(code, /cardCls\("asr"\)/, "转写卡片要能被高亮");
+});
+
+test("可选的字幕来源在状态里带标记，界面才敢把它画成灰的", () => {
+  const pipeline = readFileSync(join(root, "lib/pipeline.js"), "utf8");
+  const api = readFileSync(join(root, "lib/api.js"), "utf8");
+  assert.match(pipeline, /optional:\s*pid === "local"/);
+  assert.match(api, /optional:\s*p\.optional === true/);
+});
+
 test("默认配置文件的路径真的存在", () => {
   const rel = pkg.dsh && pkg.dsh.bundle && pkg.dsh.bundle.patch;
   assert.equal(typeof rel, "string");

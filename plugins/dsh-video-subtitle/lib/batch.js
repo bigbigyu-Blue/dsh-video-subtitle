@@ -148,6 +148,12 @@ export async function expandTargets(inputs, { request, signal, parts = false } =
   return out;
 }
 
+/** 取 pipeline 给出的「下一步该干什么」，最多三条，免得回执太长。 */
+function failHints(res) {
+  const list = (Array.isArray(res?.hints) ? res.hints : []).filter((h) => typeof h === "string" && h.trim());
+  return list.slice(0, 3);
+}
+
 /**
  * 把 pipeline 的失败原因翻译成一句人话，写进这一条的 error。
  * 优先用覆盖面不足这种最具体的原因，其次才列各源的报错。
@@ -326,6 +332,8 @@ export async function batchFetch(args = {}) {
       blocks,
       tracks,
       error: ok ? null : failReason(res),
+      // 单条失败也带上「下一步」：否则整批里这条只剩一句原因，人还是不知道要动哪
+      hints: ok ? [] : failHints(res),
       elapsedMs: Date.now() - t0,
     });
   }

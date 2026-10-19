@@ -6,3 +6,11 @@ Thumbs.db
 _c.sh
 _p.sh
 _tmp/
+
+# 插件以外的说明文档一律不进版本库
+/AGENTS.md
+/规格说明.md
+/技术方案.md
+/任务清单.md
+/现场记录.md
+/文档写法.md

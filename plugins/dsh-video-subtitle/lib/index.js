@@ -96,7 +96,7 @@ const SYSTEM_PROMPT = [
   "【取字幕】subtitle_fetch(url)：把字幕写入本地 .srt 文件，只回元数据（标题、时长、字数、路径）。正文不会进入上下文。",
   "【落盘位置】默认写进发起这次调用的那个会话自己的工作区，子目录 workspaceSubdir（默认 .subtitles）；取不到会话工作区才退回 <DSH_HOME>/subtitles。传 dir 参数可指定别处。",
   "【读正文】subtitle_read(path, from, to, max_chars)：按时间区间分段读。20 分钟视频约 2.5 万字，禁止一次整篇读。",
-  "【失败处理】subtitle_fetch 返回 ok:false 时，把 attempts[] 里每个 provider 的原因如实转述，不要编造字幕内容，不要改用别的视频替代，也不要声称已获取。",
+  "【失败处理】subtitle_fetch 返回 ok:false 时，先把 hints[] 里「下一步」原样告诉用户，再如实转述 attempts[] 里每个 provider 的原因；不要编造字幕内容，不要改用别的视频替代，也不要声称已获取。",
   "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（哪个源缺什么、上次为什么失败，在这里一眼可见）。",
   "【批量】subtitle_batch(urls, parts, lang, dir, force, max_items)：一次取多条。urls 给数组或一整段粘贴的文本（换行/逗号分隔都行）；parts=true 时先把合集的分P全部展开再逐个取，适合多集课程/连续剧。某一条失败不影响其它条，每条都有独立结果；条数超上限时如实告诉你还剩几条没取。",
   "【整理】subtitle_polish(path, dir, max_gap, max_chars)：把取回来的 .srt 拼回通顺句子并补标点，另写一份纯文稿 .txt。只做拼接和插入标点，一个原字都不改、不译、不删。B站 官方 AI 字幕是逐句短碎片、完全没有标点，要给人读或做总结就先用它整理一遍。",
@@ -146,13 +146,19 @@ function fmtFetch(v) {
     if (v.partial) {
       lines.push(`文稿不完整：只覆盖 ${v.coveragePct ?? "?"}%，未达可用线。**已丢弃、没有写文件。不能作为谈论视频内容的依据。**`);
     }
+    // 先说该干什么，再说为什么。只报原因的话，看的人不知道下一步要动哪。
+    const hints = Array.isArray(v.hints) ? v.hints.filter(Boolean) : [];
+    if (hints.length) {
+      lines.push("下一步：");
+      for (const h of hints) lines.push(`- ${h}`);
+    }
     lines.push("各 provider 尝试结果：");
     for (const a of v.attempts ?? []) {
       lines.push(`- ${a.provider}: ${a.result}${a.detail ? ` — ${a.detail}` : ""} (${a.ms ?? "-"}ms)`);
     }
     lines.push(v.partial
       ? "文稿不完整、按用户要求已丢弃：不要基于它谈论视频内容，如实告诉用户没拿到完整文稿。"
-      : "不要编造字幕内容，也不要换别的视频充数；把上面的原因如实告诉用户。");
+      : "不要编造字幕内容，也不要换别的视频充数；把上面的原因和「下一步」如实告诉用户。");
   }
   return lines.join("\n");
 }
@@ -186,6 +192,7 @@ function fmtBatch(v) {
       for (const t of it.tracks ?? []) lines.push(`    → ${t.language} ${t.chars} 字：${t.path}`);
     } else {
       lines.push(`✘ ${head}「${it.title || "无标题"}」：${it.error ?? "原因未知"}`);
+      for (const h of it.hints ?? []) lines.push(`    下一步：${h}`);
     }
   }
   lines.push("");

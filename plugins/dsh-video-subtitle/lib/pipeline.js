@@ -277,6 +277,69 @@ function inflightKey({ url, lang, dir, force = false, cfg = {} }) {
 }
 
 /**
+ * 全部来源都失败时，告诉人要做什么，而不是只报「没有字幕」。
+ *
+ * 只按这次实际试过的来源和这台机器此刻的状态给建议，不写「可能」「也许」这种
+ * 等于没说又让人白折腾的话；凑不出具体建议时返回空数组，宁可不说也不说废话。
+ */
+export function failureHints(attempts, cfg = {}) {
+  const list = (Array.isArray(attempts) ? attempts : []).filter(Boolean);
+  const has = (r) => list.some((a) => a.result === r);
+  const tried = (pid) => list.some((a) => a.provider === pid);
+  const hit = (pid, r) => list.some((a) => a.provider === pid && a.result === r);
+  const out = [];
+  const add = (s) => {
+    const t = String(s ?? "").trim();
+    if (t && !out.includes(t) && out.length < 3) out.push(t);
+  };
+
+  if (has("CREDENTIAL_EXPIRED")) {
+    add("B站 登录已经过期。打开「设置 → 视频字幕」，点扫码登录重新扫一次，再取这条视频。");
+  } else if (hit("native", "NO_SUBTITLE") && isReady("native", cfg) === false) {
+    add("还没有登录 B站。打开「设置 → 视频字幕」点扫码登录，手机扫一下就好；官方字幕要先登录才会给出下载地址。");
+  }
+
+  if (has("LOCAL_ASR_FAILED")) {
+    add("本机转写没有跑成。打开「设置 → 视频字幕」，点「一键安装转写环境」装好，再点一次取字幕。");
+  } else if (tried("whisper") && isReady("whisper", cfg) === false) {
+    add("本机转写还没装好。打开「设置 → 视频字幕」，点「一键安装转写环境」，装完再取一次。");
+  }
+
+  if (has("AUDIO_TRUNCATED")) {
+    add("这条视频没登录时只给试看的一小段音频。先登录 B站 再取，登录后才有完整音频。");
+  }
+
+  if (has("PARTIAL")) {
+    add("每条路都只覆盖了一小段。换成有字幕的视频最省事；真要这一小段，可以在设置里把完整度门槛调低，但那拿到的是残片，不能当成整条视频的内容。");
+  }
+
+  if (has("BAD_TIMELINE")) {
+    add("字幕轨的时间对不上视频长度，拿来读会读到错的地方，所以没有给你。换一条视频试试。");
+  }
+
+  if (has("NETWORK") || has("AUDIO_UNAVAILABLE")) {
+    add("网络或视频权限出了岔子。过一会儿再取一次；再失败就是这条视频这边拿不到音频。");
+  }
+
+  if (!out.length) {
+    add("这条视频两个来源都没有给出可用字幕。换一条有字幕的视频试试；每条都失败时，到「设置 → 视频字幕」看一眼来源状态里缺什么。");
+  }
+  return out;
+}
+
+/** 某个来源此刻在这台机器上能不能用；查不出来就当不知道，不据此给建议。 */
+function isReady(pid, cfg) {
+  const p = PROVIDERS[pid];
+  if (!p || typeof p.availability !== "function") return null;
+  try {
+    const av = p.availability(cfg);
+    return typeof av?.ready === "boolean" ? av.ready : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 工具等待上限：按实际启用的字幕源数量算，再留出取视频信息与落盘的余量。
  * 旧写法固定按 4 个源算死，改了 providerOrder 之后预算不跟着变：源少时白等，
  * 源多时最后一条会被硬掐断。
@@ -411,13 +474,37 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
   }
 
   if (!best) {
-    return { ok: false, cached: false, source: null, tracks: [], attempts, elapsedMs: Date.now() - startedAt, ...head };
+    const hints = failureHints(attempts, cfg);
+    return {
+      ok: false,
+      cached: false,
+      source: null,
+      tracks: [],
+      attempts,
+      hints,
+      nextStep: hints[0] ?? "",
+      elapsedMs: Date.now() - startedAt,
+      ...head,
+    };
   }
 
   const covered = best.fullAudio === true || best.coverage == null || best.coverage >= fullPct;
   if (!covered) {
     log(`[videosub] ${base} 最优结果不完整（覆盖 ${best.coverage}% < ${fullPct}%），按用户要求不写文件`);
-    return { ok: false, cached: false, source: best.pid, partial: true, coveragePct: best.coverage, tracks: [], attempts, elapsedMs: Date.now() - startedAt, ...head };
+    const hints = failureHints(attempts, cfg);
+    return {
+      ok: false,
+      cached: false,
+      source: best.pid,
+      partial: true,
+      coveragePct: best.coverage,
+      tracks: [],
+      attempts,
+      hints,
+      nextStep: hints[0] ?? "",
+      elapsedMs: Date.now() - startedAt,
+      ...head,
+    };
   }
 
   // 只保留视频原文语种那一条（用户要求）：语种按标题+简介判断，判断不出就保留首选并明确说明

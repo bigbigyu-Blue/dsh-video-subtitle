@@ -16,6 +16,7 @@ import * as feiyudoProvider from "./providers/feiyudo.js";
 import * as localProvider from "./providers/local.js";
 import * as whisperProvider from "./providers/whisper.js";
 import { probeLanguage } from "./providers/local.js";
+import { polishSrt } from "./text-format.js";
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -501,6 +502,29 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
   return { ok: true, cached: false, source: best.pid, partial: false, metaPath, tracks: written, keptLang, availableLangs, langNote, attempts, elapsedMs, ...head };
 }
 
+/**
+ * 把一份取回来的字幕整理成能读的版本：碎片拼回句子、补标点，另写纯文稿。
+ *
+ * 只做拼接与插入标点，原文一个字都不改——字幕是别人说的话，改写等于伪造内容。
+ * 输出与源文件同目录、同名加 .polished 后缀，不会覆盖原始 .srt（原始件还要用来核对）。
+ */
+export async function polishSubtitle({ path: file, dir, maxGap, maxChars } = {}) {
+  const src = path.resolve(String(file ?? "").trim());
+  if (!String(file ?? "").trim()) throw new Error("path 必填：请传 subtitle_fetch 返回的 .srt 路径");
+  const content = await fs.readFile(src, "utf8");
+  const out = polishSrt(content, { maxGap, maxChars });
+  if (!out.blocks.length) throw new Error(`没能从这个文件里解析出任何字幕段落：${src}`);
+  const outDir = dir ? path.resolve(String(dir)) : path.dirname(src);
+  await fs.mkdir(outDir, { recursive: true });
+  const stem = path.basename(src).replace(/\.srt$/i, "");
+  const srtPath = path.join(outDir, `${stem}.polished.srt`);
+  const textPath = path.join(outDir, `${stem}.polished.txt`);
+  await fs.writeFile(srtPath, out.srt, "utf8");
+  await fs.writeFile(textPath, out.text.endsWith("\n") ? out.text : `${out.text}\n`, "utf8");
+  const st = srtStats(out.srt);
+  return { ok: true, path: src, srtPath, textPath, chars: st.textChars, blocks: st.blocks, stats: out.stats };
+}
+
 export async function subtitleRead({ path: file, from, to, maxChars = 6000 }) {
   const full = path.resolve(String(file));
   const content = await fs.readFile(full, "utf8");
@@ -521,13 +545,17 @@ export function providersStatus(cfg = {}) {
     let placeholder = null;
     let missing = null;
     let note = null;
-    const checker = pid === "local" ? localProvider : pid === "whisper" ? whisperProvider : null;
+    const checker = pid === "local" ? localProvider : pid === "whisper" ? whisperProvider : pid === "native" ? nativeProvider : null;
     if (checker && typeof checker.availability === "function") {
       try {
         const av = checker.availability(cfg);
-        if (!av.ready) {
+        if (av.ready) {
+          // native 就绪时把「凭据从哪来」写出来：拿不到官方 AI 字幕时，第一条要查的就是凭据还在不在。
+          // availability 的 detail 只说明来源与缺没缺字段，不含任何凭据值。
+          if (pid === "native") note = av.detail;
+        } else {
           missing = av.missing;
-          placeholder = `本机缺：${av.missing.join("、")}`;
+          placeholder = pid === "local" ? `本机缺：${av.missing.join("、")}` : `未就绪：缺少${av.missing.join("、")}`;
         }
       } catch (e) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;

@@ -1,11 +1,14 @@
 /**
  * dsh-video-subtitle — DeepSeek Harness tool plugin.
  *
- * Registers three model-facing tools on ctx.tools:
+ * Registers five model-facing tools on ctx.tools:
  *   subtitle_fetch      fetch a video's subtitles into a local .srt file through
  *                       a provider chain, returning metadata only
  *   subtitle_read       read a saved .srt by time range and character budget
  *   subtitle_providers  report provider-chain status for diagnostics
+ *   subtitle_batch      fetch many videos (or every 分P of a collection) in one call
+ *   subtitle_polish     rewrite a fetched .srt into readable sentences plus a plain
+ *                       text transcript, without changing a single original character
  *
  * Deliberate design: the transcript text never enters the model context unless
  * asked for in slices — a 20-minute video is ~25k characters.
@@ -16,7 +19,16 @@
  */
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
-import { subtitleFetch, subtitleRead, providersStatus, defaultSaveDir, workspaceSaveDir, fetchTimeoutBudget } from "./pipeline.js";
+import {
+  subtitleFetch,
+  subtitleRead,
+  polishSubtitle,
+  providersStatus,
+  defaultSaveDir,
+  workspaceSaveDir,
+  fetchTimeoutBudget,
+} from "./pipeline.js";
+import { batchFetch } from "./batch.js";
 import { clock } from "./srt.js";
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -43,6 +55,10 @@ const Config = z.object({
   whisperTmpDir: z.string().default(""),
   whisperModel: z.string().default("small"),
   whisperThreads: z.number().default(4),
+  // 批处理一次喂给模型的音频窗口数；实测比逐段转写快约 1.25 倍，0 = 关掉批处理退回逐段
+  whisperBatchSize: z.number().default(8),
+  // 批处理拿到的词级时间戳按多少字收一条字幕，越小越细碎
+  whisperMaxChars: z.number().default(24),
   whisperLang: z.string().default("auto"),
   whisperTimeoutMs: z.number().default(1800000),
   whisperMaxMinutes: z.number().default(180),
@@ -57,6 +73,11 @@ const Config = z.object({
   senseVoiceModel: z.string().default(""),
   senseVoiceTokens: z.string().default(""),
   cacheTtlDays: z.number().default(30),
+  // B站 登录凭据：登录 + WBI 签名才拿得到官方 AI 字幕轨，匿名一律没有
+  biliCookie: z.string().default(""),
+  biliCredentialFile: z.string().default(""),
+  // 批量取字幕单次最多跑几条（合集分P很多时防止一次跑太久），被截掉的条数会如实报出来
+  batchMaxItems: z.number().default(20),
 });
 
 const SYSTEM_PROMPT = [
@@ -66,7 +87,11 @@ const SYSTEM_PROMPT = [
   "【读正文】subtitle_read(path, from, to, max_chars)：按时间区间分段读。20 分钟视频约 2.5 万字，禁止一次整篇读。",
   "【失败处理】subtitle_fetch 返回 ok:false 时，把 attempts[] 里每个 provider 的原因如实转述，不要编造字幕内容，不要改用别的视频替代，也不要声称已获取。",
   "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（第三方站点改版、抽签失败在这里一眼可见）。",
-  "provider 顺序默认 native→feiyudo→whisper→local，在 profile 的 cordis.patch.yml 里可改；第三方站换域名改 feiyudoBaseUrl。whisper 是本机转写，任何视频都能转但慢（约每分钟音频 8 秒），没有次数限制。",
+  "【批量】subtitle_batch(urls, parts, lang, dir, force, max_items)：一次取多条。urls 给数组或一整段粘贴的文本（换行/逗号分隔都行）；parts=true 时先把合集的分P全部展开再逐个取，适合多集课程/连续剧。某一条失败不影响其它条，每条都有独立结果；条数超上限时如实告诉你还剩几条没取。",
+  "【整理】subtitle_polish(path, dir, max_gap, max_chars)：把取回来的 .srt 拼回通顺句子并补标点，另写一份纯文稿 .txt。只做拼接和插入标点，一个原字都不改、不译、不删。B站 官方 AI 字幕是逐句短碎片、完全没有标点，要给人读或做总结就先用它整理一遍。",
+  "provider 顺序默认 native→feiyudo→whisper→local，在 profile 的 cordis.patch.yml 里可改；第三方站换域名改 feiyudoBaseUrl。",
+  "native 是主力源：B站 官方 AI 字幕轨要「已登录 + WBI 签名」才会返回地址，匿名拿不到。插件自动读本机已有登录凭据（biliCredentialFile 或 biliCookie），通常在 1 秒内返回。拿不到时先看 subtitle_providers 里 native 那行写的凭据状态，不要去猜视频没有字幕。",
+  "whisper 是本机转写，任何有声音的视频都能转但慢（约每分钟音频 8 秒），没有次数限制；它转的是整段音频，结果标记为完整。",
 ].join("\n");
 
 function clampInt(v, dflt, min, max) {
@@ -130,6 +155,48 @@ function fmtRead(v) {
   const head = `读取 ${v.path} | 命中 ${v.matchedBlocks}/${v.totalBlocks} 段 | 本次 ${v.lines} 行 ${v.chars} 字${tail}`;
   const rangeNote = v.range && (v.range.from != null || v.range.to != null) ? ` | 区间 ${v.range.from ?? "起"}~${v.range.to ?? "止"}s` : "";
   return `${head}${rangeNote}\n${v.text || "（该区间没有内容）"}`;
+}
+
+function fmtBatch(v) {
+  const lines = [];
+  const bad = (v.items ?? []).filter((it) => !it.ok).length;
+  lines.push(
+    `批量取字幕：共 ${v.total} 条 | 成功 ${vItemsOk(v)} | 失败 ${bad} | 跳过 ${v.skipped ?? 0} | 用时 ${Math.round((v.elapsedMs ?? 0) / 1000)} 秒`,
+  );
+  if (v.aborted) lines.push("中途被取消，下面是取消前已经跑完的部分。");
+  if (v.truncated > 0) lines.push(`还有 ${v.truncated} 条没取（单次上限），要取完请再调一次并只传剩下的链接。`);
+  lines.push("");
+  for (const it of v.items ?? []) {
+    const tag = it.page ? ` P${it.page}` : "";
+    const head = it.bvid ? `${it.bvid}${tag}` : String(it.url ?? "?").slice(0, 60);
+    if (it.ok) {
+      const cov = it.coveragePct == null ? "" : ` · 覆盖 ${it.coveragePct}%`;
+      lines.push(`✔ ${head}「${it.title || "无标题"}」${it.cached ? " · 命中已有文件" : ` · 来源 ${it.source ?? "?"}`} · ${it.chars} 字 / ${it.blocks} 段${cov}`);
+      for (const t of it.tracks ?? []) lines.push(`    → ${t.language} ${t.chars} 字：${t.path}`);
+    } else {
+      lines.push(`✘ ${head}「${it.title || "无标题"}」：${it.error ?? "原因未知"}`);
+    }
+  }
+  lines.push("");
+  lines.push(`合计 ${v.totalChars} 字。正文未进入上下文；要看内容用 subtitle_read(path, from, to)，要给人读的版本用 subtitle_polish(path)。`);
+  return lines.join("\n");
+}
+
+/** 成功条数单独算：total 里含跳过项，不能拿 total 减失败。 */
+function vItemsOk(v) {
+  return (v.items ?? []).filter((it) => it.ok).length;
+}
+
+function fmtPolish(v) {
+  const s = v.stats ?? {};
+  const lines = [
+    `已整理：${v.path}`,
+    `段落 ${s.before ?? "?"} → ${s.after ?? "?"} 段（并掉 ${s.merged ?? 0} 段，补标点 ${s.punctuated ?? 0} 段），${v.chars ?? 0} 字`,
+    `可读字幕：${v.srtPath}`,
+    `纯文稿：${v.textPath}`,
+    "只做了拼接与插入标点，原文一个字都没改。正文未进入上下文；要读纯文稿直接读那个 .txt 文件。",
+  ];
+  return lines.join("\n");
 }
 
 function fmtStatus(v) {
@@ -237,6 +304,91 @@ function apply(ctx, config) {
 
   ctx.tools.register(
     defineTool({
+      name: "subtitle_batch",
+      description:
+        "Fetch subtitles for MANY videos in one call, or for every 分P of a collection when parts=true. " +
+        "urls accepts an array or one pasted blob (newlines / commas / spaces). Each item gets its own " +
+        "ok/error, so one dead link never sinks the batch. Returns metadata only — same rule as subtitle_fetch: " +
+        "no transcript text enters the context. Items beyond max_items are reported as truncated, never silently dropped.",
+      parameters: {
+        urls: { type: "string", required: true, description: "One or more video links/ids, separated by newlines, commas or spaces (or pass a JSON array)" },
+        parts: { type: "boolean", description: "true = expand every 分P of a collection into its own target first (default false)" },
+        lang: { type: "string", description: "Preferred subtitle language, e.g. zh or en" },
+        dir: { type: "string", description: "Output directory (default follows the plugin's saveToWorkspace / saveDir policy)" },
+        force: { type: "boolean", description: "Ignore the local cache and fetch again (default false)" },
+        max_items: { type: "integer", description: "Max targets to process in this call (default batchMaxItems, 20)" },
+      },
+      output: {
+        schema: { type: "json" },
+        render: (_args, value) => [{ type: "text", text: fmtBatch(value) }],
+      },
+      // 批量是串行跑：每条都可能走到本机转写，上限按单条预算乘条数算，再加取视频信息的余量
+      timeoutMs: fetchTimeoutBudget(cfg) * clampInt(cfg.batchMaxItems, 20, 1, 100) + 60000,
+      async execute(args, exec) {
+        let urls = args.urls;
+        // 参数声明成字符串，是为了让人能整段粘贴；数组同样接受
+        if (typeof urls === "string") {
+          const t = urls.trim();
+          if (t.startsWith("[")) {
+            try {
+              const arr = JSON.parse(t);
+              if (Array.isArray(arr)) urls = arr.map((x) => String(x));
+            } catch {
+              /* 不是合法 JSON 就按分隔符切开，跟普通粘贴一样处理 */
+            }
+          }
+        }
+        return batchFetch({
+          urls,
+          parts: args.parts === true,
+          lang: args.lang,
+          dir: args.dir,
+          force: args.force === true,
+          cfg,
+          signal: exec.signal,
+          log,
+          workspaceRoot: exec?.agent?.session?.header?.cwd ?? "",
+          maxItems: clampInt(args.max_items, clampInt(cfg.batchMaxItems, 20, 1, 100), 1, 100),
+        });
+      },
+      presentCall: (args) => ({ card: "generic", title: "批量取字幕", kind: "fetch", rawInput: String(args.urls ?? "").slice(0, 80) }),
+    }),
+  );
+
+  ctx.tools.register(
+    defineTool({
+      name: "subtitle_polish",
+      description:
+        "Turn a fetched .srt into something a human can read: merge the fragment lines back into sentences by " +
+        "time gap, insert punctuation, and write both a cleaned .srt and a plain .txt transcript next to it. " +
+        "It only joins and inserts punctuation — it never rewrites, deletes, translates or reorders a single " +
+        "original character. Use it before quoting, summarizing or showing subtitles to the user, because " +
+        "Bilibili's AI subtitles ship as punctuation-free fragments.",
+      parameters: {
+        path: { type: "string", required: true, description: "Absolute path of a .srt file created by subtitle_fetch" },
+        dir: { type: "string", description: "Where to write the cleaned files (default: same directory as the input)" },
+        max_gap: { type: "number", description: "Merge fragments whose gap is at most this many seconds (default 0.6)" },
+        max_chars: { type: "number", description: "Never let a merged sentence exceed this many characters (default 42)" },
+      },
+      output: {
+        schema: { type: "json" },
+        render: (_args, value) => [{ type: "text", text: fmtPolish(value) }],
+      },
+      timeoutMs: 60000,
+      async execute(args) {
+        return polishSubtitle({
+          path: args.path,
+          dir: args.dir,
+          maxGap: args.max_gap,
+          maxChars: args.max_chars,
+        });
+      },
+      presentCall: (args) => ({ card: "generic", title: args.path, kind: "write", rawInput: args.path }),
+    }),
+  );
+
+  ctx.tools.register(
+    defineTool({
       name: "subtitle_providers",
       description:
         "Report the subtitle provider chain: which providers are wired, and each one's last attempt " +
@@ -265,4 +417,6 @@ function apply(ctx, config) {
 }
 
 export { Config, apply, inject, name };
-export { subtitleFetch, subtitleRead, providersStatus, defaultSaveDir, workspaceSaveDir } from "./pipeline.js";
+export { subtitleFetch, subtitleRead, polishSubtitle, providersStatus, defaultSaveDir, workspaceSaveDir } from "./pipeline.js";
+export { batchFetch, parseBatchSpec, expandTargets } from "./batch.js";
+export { polishSrt, assembleSentences, addPunctuation, toPlainText } from "./text-format.js";

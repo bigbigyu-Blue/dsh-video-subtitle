@@ -6,10 +6,12 @@
  * 音频直接用 PyAV 解码，不需要 ffmpeg，是唯一一个「任何视频都能转、且不会用完」的来源。
  *
  *   dash audio (anonymous playurl) -> .m4s
- *     -> python + faster-whisper (CPU int8) -> 分段 JSON -> SRT
+ *     -> python + faster-whisper (CPU int8) -> 条目 JSON -> SRT
  *
- * 代价是慢：实测约 1 分钟音频要 7~10 秒，30 分钟视频约 4 分钟。所以它的超时上限
- * 单独按 whisperTimeoutMs 算（默认 30 分钟），不跟别的源共用 90 秒。
+ * 速度：默认走 BatchedInferencePipeline 批处理 + 词级时间戳，再按标点/字数重新切成短条目。
+ * 实测 180 秒音频 22.5 秒降到 17.9 秒（1.25 倍）；1494 秒整段 130.9 秒（约 11 倍实时），
+ * 30 分钟视频约 2 分半。批处理不可用时自动退回逐段转写，结果仍然可用。
+ * 超时上限单独按 whisperTimeoutMs 算（默认 30 分钟），不跟别的源共用 90 秒。
  */
 import { spawn } from "node:child_process";
 import { promises as fs, existsSync } from "node:fs";
@@ -23,15 +25,144 @@ export const id = "whisper";
 const API = "https://api.bilibili.com";
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
 
+/** 句末标点：词尾遇到这些就把当前条目收掉。 */
+const FINAL_PUNCT = "。！？!?…";
+
+/**
+ * 词级切分（与 SCRIPT 里的 Python 实现逐字对应，改一处就要改另一处）：
+ * 逐词累加，词尾是句末标点或累加字数达到 maxChars 就收一条；
+ * start/end 取该条首词 start 与末词 end，并保证时间轴单调、end 大于 start。
+ */
+export function splitWordsToCues(words, { maxChars = 24 } = {}) {
+  const limit = Math.max(4, Math.trunc(Number(maxChars)) || 24);
+  const cues = [];
+  if (!Array.isArray(words)) return cues;
+  let buf = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const text = buf.map((w) => w.text).join("").trim();
+    if (text) cues.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
+    buf = [];
+  };
+  for (const w of words) {
+    const raw = String(w?.word ?? w?.text ?? "");
+    const text = raw.trim();
+    if (!text) continue;
+    buf.push({ start: Number(w.start) || 0, end: Number(w.end) || 0, text: raw });
+    const joined = buf.map((b) => b.text).join("").trim();
+    if (FINAL_PUNCT.includes(text.slice(-1)) || joined.length >= limit) flush();
+  }
+  flush();
+  return clampCues(cues);
+}
+
+/** 收尾兜底：时间轴单调、end 至少比 start 大 0.01 秒。 */
+function clampCues(cues) {
+  const out = [];
+  let prevEnd = 0;
+  for (const c of cues) {
+    const start = Math.max(c.start, prevEnd);
+    const end = Math.max(c.end, start + 0.01);
+    const text = String(c.text ?? "").trim();
+    if (!text) continue;
+    prevEnd = end;
+    out.push({ start, end, text });
+  }
+  return out;
+}
+
 /** 内嵌的转写脚本：只做「读音频 → 转写 → 写 JSON」三件事，出错就把原因写进 JSON。 */
 const SCRIPT = `
 import json, os, sys
-audio, out, model_name, hf_home, threads, lang = sys.argv[1:7]
-os.environ["HF_HOME"] = hf_home
-os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
-res = {"ok": False, "error": "", "language": "", "duration": 0, "segments": []}
+
+FINAL_PUNCT = "。！？!?…"
+
+
+def split_words(words, max_chars):
+    cues = []
+    buf = []
+
+    def flush():
+        if not buf:
+            return
+        text = "".join([w[2] for w in buf]).strip()
+        if text:
+            cues.append([buf[0][0], buf[-1][1], text])
+        del buf[:]
+
+    for st, en, wd in words:
+        wd = wd or ""
+        if not wd.strip():
+            continue
+        buf.append([float(st), float(en), wd])
+        joined = "".join([w[2] for w in buf]).strip()
+        if wd.strip()[-1] in FINAL_PUNCT or len(joined) >= max_chars:
+            flush()
+    flush()
+    return cues
+
+
+def cues_of(segs, max_chars):
+    rows = []
+    for s in segs:
+        words = list(getattr(s, "words", None) or [])
+        text = (s.text or "").strip()
+        if words:
+            rows.extend(split_words([(w.start, w.end, w.word) for w in words], max_chars))
+        elif text:
+            rows.append([float(s.start), float(s.end), text])
+    return rows
+
+
+def clamp_rows(rows):
+    out = []
+    prev_end = 0.0
+    for st, en, text in rows:
+        text = (text or "").strip()
+        if not text:
+            continue
+        st = max(float(st), prev_end)
+        en = max(float(en), st + 0.01)
+        prev_end = en
+        out.append({"start": st, "end": en, "text": text})
+    return out
+
+
+argv = sys.argv[1:]
+
+
+def arg(i, d):
+    return argv[i] if i < len(argv) and argv[i] != "" else d
+
+
+def num(s, d):
+    try:
+        return int(float(s))
+    except Exception:
+        return d
+
+
+audio = arg(0, "")
+out = arg(1, "")
+model_name = arg(2, "small")
+hf_home = arg(3, "")
+threads = num(arg(4, "4"), 4)
+lang = arg(5, "auto")
+batch_size = num(arg(6, "8"), 8)
+max_chars = num(arg(7, "24"), 24)
+if batch_size < 0:
+    batch_size = 0
+if max_chars < 4:
+    max_chars = 4
+
+res = {"ok": False, "error": "", "language": "", "duration": 0, "segments": [], "mode": "plain", "fallback": ""}
+
 try:
+    if not audio or not out:
+        raise ValueError("缺少音频路径或输出路径")
+    os.environ["HF_HOME"] = hf_home
+    os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     from faster_whisper import WhisperModel
     m = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=int(threads))
     kw = {"vad_filter": True, "beam_size": 1, "log_progress": False}
@@ -40,9 +171,29 @@ try:
         kw["initial_prompt"] = "以下是普通话的句子，用简体中文。"
     if lang and lang != "auto":
         kw["language"] = lang
-    segs, info = m.transcribe(audio, **kw)
-    rows = [{"start": float(s.start), "end": float(s.end), "text": s.text.strip()} for s in segs]
-    res["segments"] = [r for r in rows if r["text"]]
+    rows = None
+    info = None
+    if batch_size > 0:
+        try:
+            from faster_whisper import BatchedInferencePipeline
+            bp = BatchedInferencePipeline(model=m)
+            # 注意：faster-whisper 1.2.1 的批处理与 clip_timestamps 不兼容，绝不能传
+            segs, info = bp.transcribe(audio, batch_size=int(batch_size), word_timestamps=True, **kw)
+            rows = cues_of(segs, int(max_chars))
+            res["mode"] = "batch"
+            res["batch_size"] = int(batch_size)
+        except Exception as be:
+            res["fallback"] = "%s: %s" % (type(be).__name__, be)
+            rows = None
+    if rows is None:
+        segs, info = m.transcribe(audio, **kw)
+        rows = []
+        for s in segs:
+            t = (s.text or "").strip()
+            if t:
+                rows.append([float(s.start), float(s.end), t])
+        res["mode"] = "plain"
+    res["segments"] = clamp_rows(rows)
     res["language"] = getattr(info, "language", "") or ""
     res["duration"] = float(getattr(info, "duration", 0) or 0)
     res["ok"] = True
@@ -52,6 +203,11 @@ with open(out, "w", encoding="utf-8") as f:
     json.dump(res, f, ensure_ascii=False)
 `;
 
+function numOr(v, dflt) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : dflt;
+}
+
 function resolvePaths(cfg) {
   const bili = path.join(DSH_HOME, "bili-duty");
   return {
@@ -59,6 +215,9 @@ function resolvePaths(cfg) {
     hfHome: cfg.whisperHfHome || path.join(bili, ".hf-cache"),
     model: cfg.whisperModel || "small",
     threads: Number(cfg.whisperThreads ?? cfg.localThreads ?? 4),
+    // 0 表示关闭批处理，退回逐段转写
+    batchSize: Math.max(0, Math.trunc(numOr(cfg.whisperBatchSize, 8))),
+    maxChars: Math.max(4, Math.trunc(numOr(cfg.whisperMaxChars, 24))),
     // 系统临时目录在受限环境下不可写（mkdtemp 报 EPERM），所以优先用模型缓存旁边
     // 已经存在的目录；都不可写时再退回系统临时目录。
     tmpRoot: cfg.whisperTmpDir || process.env.DSH_WHISPER_TMP || path.join(bili, "tmp", "asr"),
@@ -201,10 +360,12 @@ export async function fetchSubtitles({ meta, ctx }) {
 
     const langArg = String(ctx.cfg.whisperLang || "auto");
     const timeoutMs = Math.max(60000, Number(ctx.cfg.whisperTimeoutMs ?? 1800000));
-    ctx.log(`[videosub] whisper 开始转写 ${meta.bvid}（模型 ${p.model}，上限 ${Math.round(timeoutMs / 60000)} 分钟）`);
+    ctx.log(
+      `[videosub] whisper 开始转写 ${meta.bvid}（模型 ${p.model}，批处理 ${p.batchSize || "关"}，上限 ${Math.round(timeoutMs / 60000)} 分钟）`,
+    );
     const run = await runPython(
       p.python,
-      [script, m4s, outJson, p.model, p.hfHome, String(p.threads), langArg],
+      [script, m4s, outJson, p.model, p.hfHome, String(p.threads), langArg, String(p.batchSize), String(p.maxChars)],
       { timeoutMs, signal: ctx.signal },
     );
     if (!existsSync(outJson)) {
@@ -217,10 +378,16 @@ export async function fetchSubtitles({ meta, ctx }) {
 
     const lang = String(parsed.language || "und").toLowerCase();
     const minutes = (Number(parsed.duration || meta.durationS || 0) / 60).toFixed(1);
+    const speedNote =
+      parsed.mode === "batch"
+        ? ` · 批处理加速（每批 ${Number(parsed.batch_size || p.batchSize)} 条）`
+        : parsed.fallback
+          ? ` · 批处理降级（${String(parsed.fallback).slice(0, 120)}）`
+          : "";
     return {
       source: id,
       fullAudioProcessed: true,
-      note: `本地 faster-whisper 转写 ${minutes} 分钟音频（模型 ${p.model}）· 音频主机 ${host}`,
+      note: `本地 faster-whisper 转写 ${minutes} 分钟音频（模型 ${p.model}）· 音频主机 ${host}${speedNote}`,
       tracks: [
         {
           lang,

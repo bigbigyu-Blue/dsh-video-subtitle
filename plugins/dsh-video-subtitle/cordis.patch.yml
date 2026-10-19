@@ -8,6 +8,7 @@
         # 总开关
         enabled: true
         # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
+        # native 是主力源：B站 官方 AI 字幕要「登录凭据 + WBI 签名」才给地址，匿名拿不到
         providerOrder: ['native', 'feiyudo', 'whisper', 'local']
         # 固定字幕落盘目录；留空 = 交给下面的 saveToWorkspace 策略
         saveDir: ''
@@ -27,6 +28,11 @@
         # 第三方站每天最多取几条（0 = 不自己限制，完全听站点的）。跨天自动归零，
         # 站点自己回「今日次数已达上限」时当天不再白打请求
         feiyudoDailyMax: 20
+        # B站 登录凭据：只在本机内存里用，不打印、不写回、不上传
+        # 留空 = 自动读 <DSH_HOME>/bili-duty/bili_credential.json
+        # 也可以直接把一整条 Cookie 串写进 biliCookie
+        biliCookie: ''
+        biliCredentialFile: ''
         # 本机 faster-whisper 转写（不依赖第三方、无次数限制，代价是慢）
         # python 环境与模型缓存留空 = 自动找 <DSH_HOME>/bili-duty 下现成的那套
         whisperPython: ''
@@ -35,6 +41,10 @@
         whisperTmpDir: ''
         whisperModel: 'small'
         whisperThreads: 4
+        # 批处理一次喂几段音频：实测比逐段转写快约 1.25 倍；0 = 关掉批处理退回逐段
+        whisperBatchSize: 8
+        # 批处理拿到的词级时间戳按多少字收一条：越小越细碎
+        whisperMaxChars: 24
         # auto = 让模型自己判断语种；也可写 zh / en / ja
         whisperLang: 'auto'
         # 单个视频转写的时间上限（毫秒，默认 30 分钟）
@@ -58,3 +68,5 @@
         senseVoiceTokens: ''
         # 缓存有效期（天）：命中则不发任何请求
         cacheTtlDays: 30
+        # 批量取字幕单次最多跑几条（合集有很多分P时防止一次跑太久）；被截掉的条数会如实报出来
+        batchMaxItems: 20

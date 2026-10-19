@@ -23,6 +23,7 @@ import { Readable } from "node:stream";
 import path from "node:path";
 import os from "node:os";
 import { msToTimestamp, detectScriptLang } from "../srt.js";
+import { localEnvPaths } from "../local-env.js";
 
 export const id = "local";
 const API = "https://api.bilibili.com";
@@ -69,13 +70,33 @@ function findAddon() {
   return cands.find((c) => existsSync(c)) ?? null;
 }
 
+/** 老位置：以前模型和词表是让人自己放在这里的，现在只当兼容。 */
+const LEGACY_MODEL_DIR = path.join(DSH_HOME, "speech-to-text", "sensevoice", "models", "sensevoice-onnx");
+
+/**
+ * 按「配置 → 插件自己装的位置 → 老位置」的顺序挑文件。
+ * 找到就返回那一条；都找不到时返回第一条非空路径，报错里能看见它去哪里找过。
+ */
+function pickFile(cands) {
+  const list = cands.map((c) => String(c ?? "").trim()).filter(Boolean);
+  const hit = list.find((c) => existsSync(c));
+  return hit ?? null;
+}
+
+function pickPath(cands) {
+  const list = cands.map((c) => String(c ?? "").trim()).filter(Boolean);
+  return list.find((c) => existsSync(c)) ?? list[0] ?? null;
+}
+
 function resolvePaths(cfg) {
-  const base = path.join(DSH_HOME, "speech-to-text", "sensevoice", "models", "sensevoice-onnx");
+  // 一键安装的位置在 lib/local-env.js 里定：<DSH_HOME>/video-subtitle/local。
+  // 先看配置里有没有自己指，再看他装好的那份，最后才回头找老位置。
+  const env = localEnvPaths(cfg);
   return {
-    ffmpeg: cfg.ffmpegPath || process.env.IMAGEIO_FFMPEG_EXE || findImageioFfmpeg(),
-    addon: cfg.sherpaAddonPath || findAddon(),
-    model: cfg.senseVoiceModel || path.join(base, "model.int8.onnx"),
-    tokens: cfg.senseVoiceTokens || path.join(base, "tokens.txt"),
+    ffmpeg: pickFile([cfg.ffmpegPath, process.env.IMAGEIO_FFMPEG_EXE, env.ffmpeg, findImageioFfmpeg()]),
+    addon: pickFile([cfg.sherpaAddonPath, findAddon()]),
+    model: pickPath([cfg.senseVoiceModel, env.model, path.join(LEGACY_MODEL_DIR, "model.int8.onnx")]),
+    tokens: pickPath([cfg.senseVoiceTokens, env.tokens, path.join(LEGACY_MODEL_DIR, "tokens.txt")]),
   };
 }
 
@@ -133,6 +154,27 @@ function blocksToSrt(blocks) {
     lines.push("");
   });
   return lines.join("\n");
+}
+
+/**
+ * 找一个真能建目录的地方当临时工作区。
+ *
+ * 为什么要试好几个：这台机器的 Python 与子进程跑在受限的完整性级别下，系统临时目录
+ * （%LOCALAPPDATA%\Temp）建目录会被拒（EPERM 权限不足），只有插件自己那棵树对它放行。
+ * 所以先试 <DSH_HOME>/video-subtitle/local/tmp，再退到系统临时目录。
+ */
+async function makeTmpDir(cfg) {
+  const cands = [...new Set([localEnvPaths(cfg).tmp, os.tmpdir()].filter(Boolean))];
+  let lastErr = null;
+  for (const root of cands) {
+    try {
+      await fs.mkdir(root, { recursive: true });
+      return await fs.mkdtemp(path.join(root, "run-"));
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`本机识别的临时目录都建不了（${cands.join("、")}）：${lastErr?.message ?? lastErr}`);
 }
 
 /**
@@ -233,7 +275,12 @@ export async function probeLanguage({ meta, ctx }) {
   );
   const url = pu?.data?.dash?.audio?.[0]?.baseUrl ?? pu?.data?.dash?.audio?.[0]?.base_url;
   if (!url) return null;
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "videosub-probe-"));
+  let tmp;
+  try {
+    tmp = await makeTmpDir(ctx.cfg);
+  } catch {
+    return null; // 探测只是锦上添花，建不了临时目录就跳过，别把整条抓取链搞挂
+  }
   const wav = path.join(tmp, "p.wav");
   try {
     const dec = await runProcess(
@@ -262,18 +309,18 @@ export async function probeLanguage({ meta, ctx }) {
 export function availability(cfg = {}) {
   const p = resolvePaths(cfg);
   const missing = [];
-  if (!p.ffmpeg) missing.push("ffmpeg（配置 ffmpegPath，或安装 imageio-ffmpeg）");
+  if (!p.ffmpeg) missing.push("从视频里抽声音的工具");
   if (!p.addon) missing.push("sherpa-onnx 原生模块（配置 sherpaAddonPath）");
-  if (!existsSync(p.model)) missing.push(`SenseVoice 模型（${p.model}）`);
-  if (!existsSync(p.tokens)) missing.push(`SenseVoice 词表（${p.tokens}）`);
+  if (!existsSync(p.model)) missing.push(`语音识别模型（${p.model}）`);
+  if (!existsSync(p.tokens)) missing.push(`模型词表（${p.tokens}）`);
   return { ready: missing.length === 0, missing };
 }
 
 export async function fetchSubtitles({ meta, ctx }) {
   const p = resolvePaths(ctx.cfg);
-  if (!p.ffmpeg) throw ctx.error(id, "UNSUPPORTED", "找不到 ffmpeg：配置 ffmpegPath，或安装 imageio-ffmpeg");
+  if (!p.ffmpeg) throw ctx.error(id, "UNSUPPORTED", "找不到从视频里抽声音的工具：到设置里的「视频字幕」页点一键安装，或配置 ffmpegPath");
   if (!p.addon) throw ctx.error(id, "UNSUPPORTED", "找不到 sherpa-onnx 原生模块：配置 sherpaAddonPath");
-  if (!existsSync(p.model) || !existsSync(p.tokens)) throw ctx.error(id, "UNSUPPORTED", `SenseVoice 模型缺失：${p.model}`);
+  if (!existsSync(p.model) || !existsSync(p.tokens)) throw ctx.error(id, "UNSUPPORTED", `语音识别模型缺失：${p.model}，到设置里的「视频字幕」页点一键安装`);
 
   const maxMin = Number(ctx.cfg.localMaxMinutes ?? 240);
   if (meta.durationS && meta.durationS / 60 > maxMin) {
@@ -294,7 +341,7 @@ export async function fetchSubtitles({ meta, ctx }) {
     /* ignore */
   }
 
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "videosub-local-"));
+  const tmp = await makeTmpDir(ctx.cfg);
   const m4s = path.join(tmp, "a.m4s");
   const wav = path.join(tmp, "a.wav");
   try {

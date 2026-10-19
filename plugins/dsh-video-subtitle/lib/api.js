@@ -18,6 +18,7 @@ import {
 } from "./bili-login.js";
 import { toSvg } from "./qr.js";
 import { asrPaths, asrStatus, startSetup, setupState, cancelSetup, installHint } from "./asr-env.js";
+import { localStatus, localSetupState, startLocalSetup, cancelLocalSetup } from "./local-env.js";
 import { describeSettings, saveSettings, effectiveConfig, settingsFile } from "./settings.js";
 import { providersStatus, defaultSaveDir } from "./pipeline.js";
 
@@ -148,6 +149,13 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
       loginState(cfg, { request }).catch((e) => ({ loggedIn: false, expired: false, detail: String(e?.message ?? e) })),
       asrStatus(cfg).catch((e) => ({ ready: false, steps: [], error: String(e?.message ?? e) })),
     ]);
+    // 本机识别那条是同步体检，不联网，出错也照样把它报出去
+    let local;
+    try {
+      local = localStatus(cfg);
+    } catch (e) {
+      local = { ready: false, items: [], missing: [], error: String(e?.message ?? e) };
+    }
     const providers = providersStatus(cfg).map((p) => ({
       provider: p.provider,
       wired: p.wired,
@@ -161,6 +169,7 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
       version,
       login,
       asr,
+      local,
       providers,
       settings: describeSettings(cfg),
       dirs: { defaultSaveDir: defaultSaveDir(), loginFile: loginFile(), settingsFile: settingsFile() },
@@ -244,6 +253,33 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
   add("POST", `${PREFIX}/asr/cancel`, async (req, res) => {
     try {
       sendJson(res, 200, { ok: true, ...cancelSetup() });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `取消安装失败：${e?.message ?? e}` });
+    }
+  });
+
+  // 本机识别（SenseVoice）那条：装三样东西，不要 Python，装在 <DSH_HOME>/video-subtitle/local
+  add("POST", `${PREFIX}/local/setup`, async (req, res) => {
+    const cfg = config();
+    try {
+      const r = await startLocalSetup(cfg, {});
+      sendJson(res, 200, { ok: true, started: r.started, taskId: r.taskId });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `开始安装失败：${e?.message ?? e}` });
+    }
+  });
+
+  add("GET", `${PREFIX}/local/state`, async (req, res) => {
+    try {
+      sendJson(res, 200, { ok: true, ...localSetupState() });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `读安装进度失败：${e?.message ?? e}` });
+    }
+  });
+
+  add("POST", `${PREFIX}/local/cancel`, async (req, res) => {
+    try {
+      sendJson(res, 200, { ok: true, ...cancelLocalSetup() });
     } catch (e) {
       sendJson(res, 200, { ok: false, error: `取消安装失败：${e?.message ?? e}` });
     }

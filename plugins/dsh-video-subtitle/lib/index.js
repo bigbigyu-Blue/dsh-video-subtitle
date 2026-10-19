@@ -105,6 +105,7 @@ const SYSTEM_PROMPT = [
   "provider 顺序默认 native→whisper→local，在 profile 的 cordis.patch.yml 里可改。",
   "native 是主力源：B站 官方 AI 字幕轨要「已登录 + WBI 签名」才会返回地址，匿名拿不到。插件自动读本机已有登录凭据（biliCredentialFile 或 biliCookie），通常在 1 秒内返回。拿不到时先看 subtitle_providers 里 native 那行写的凭据状态，不要去猜视频没有字幕。",
   "whisper 是本机转写，任何有声音的视频都能转但慢（约每分钟音频 8 秒），没有次数限制；它转的是整段音频，结果标记为完整。",
+  "local 是本机识别（SenseVoice），通常比 whisper 快一倍左右、覆盖更全，但断句更碎、个别视频会漏句。它需要三样零件（ffmpeg、模型、词表，共约 260MB），在设置里的「视频字幕」页点一键安装就能装齐，不需要 Python。装好前它在 subtitle_providers 里会显示为可选、缺件；缺件时如实告诉用户去设置页装，不要因此说视频没有字幕。",
 ].join("\n");
 
 function clampInt(v, dflt, min, max) {

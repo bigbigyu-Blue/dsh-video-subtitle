@@ -181,6 +181,7 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = react.useState("");
       const [showLogin, setShowLogin] = react.useState(false);
       const [asr, setAsr] = react.useState(null);
+      const [localJob, setLocalJob] = react.useState(null);
       const [draft, setDraft] = react.useState({});
       const [savedTip, setSavedTip] = react.useState("");
       const [loginTip, setLoginTip] = react.useState("");
@@ -219,6 +220,25 @@ window.__ModuleLoader__.load({
         }, 1200);
         return () => clearInterval(id);
       }, [running, load]);
+
+      // 本机识别那边也在装的时候，同样每秒刷一次
+      const localRunning = localJob && localJob.running;
+      react.useEffect(() => {
+        if (!localRunning) return undefined;
+        const id = setInterval(async () => {
+          try {
+            const r = await call("/local/state");
+            setLocalJob(r);
+            if (r && r.running === false) {
+              clearInterval(id);
+              load();
+            }
+          } catch {
+            clearInterval(id);
+          }
+        }, 1200);
+        return () => clearInterval(id);
+      }, [localRunning, load]);
 
       const login = status && status.login ? status.login : null;
       const settings = (status && status.settings) || [];
@@ -289,7 +309,33 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const startLocalSetup = async () => {
+        setBusy("local");
+        try {
+          const r = await call("/local/setup", { method: "POST", body: {} });
+          if (!r.ok) throw new Error(textOf(r.error, "启动安装失败"));
+          const s = await call("/local/state");
+          setLocalJob(s);
+        } catch (e) {
+          setSavedTip("启动安装失败：" + e.message);
+        } finally {
+          setBusy("");
+        }
+      };
+
+      const cancelLocalSetup = async () => {
+        try {
+          await call("/local/cancel", { method: "POST", body: {} });
+          const s = await call("/local/state");
+          setLocalJob(s);
+        } catch {
+          /* 取消失败就算了，用户还能再点一次 */
+        }
+      };
+
       const asrReady = status && status.asr ? status.asr.ready : false;
+      const localReady = status && status.local ? status.local.ready : false;
+      const localSteps = (localJob && localJob.steps) || (status && status.local && status.local.items) || [];
       const asrSteps = (asr && asr.steps) || (status && status.asr && status.asr.steps) || [];
 
       // 来源的名字写成中文，第四路是可选的，别让人以为哪里坏了
@@ -376,7 +422,36 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
-        // 3. 来源健康状况
+        // 3. 本机识别（可选的那条快路线）
+        h(
+          "div",
+          { className: cardCls("local") },
+          h(
+            "div",
+            { className: "vsub-row" },
+            h("h3", null, "本机识别"),
+            h("span", { className: "vsub-badge " + (localReady ? "ok" : "bad") }, localReady ? "已就绪" : "缺东西"),
+            h("span", { style: { flex: 1 } }),
+            localRunning
+              ? h("button", { className: "vsub-btn", onClick: cancelLocalSetup }, "取消安装")
+              : h("button", { className: "vsub-btn " + (localReady ? "" : "primary"), onClick: startLocalSetup, disabled: busy === "local" }, localReady ? "重新检查" : "一键安装"),
+          ),
+          h("p", { className: "vsub-muted" },
+            localReady
+              ? "这条路线在你自己的电脑上认字，不联网、不限次数，通常比本机转写快得多。它排在本机转写后面，两个都装好也不冲突。"
+              : "比本机转写快，但要多装三样东西（从视频里抽声音的工具、识别模型、模型词表，一共约二百六十兆）。点上面的一键安装，全程不用装别的软件。"),
+          localSteps.length
+            ? h("ul", { className: "vsub-muted", style: { margin: "4px 0 0", paddingLeft: 20 } },
+                localSteps.map((s) => h("li", { key: s.id },
+                  (s.state === "done" ? "✔ " : s.state === "running" ? "… " : s.state === "failed" ? "✘ " : s.state === "skipped" ? "✔ " : s.present ? "✔ " : "· ") +
+                  s.label + (s.detail ? "：" + s.detail : "") + (s.bytesTotal ? "（" + s.percent + "%）" : ""))))
+            : null,
+          localJob && localJob.log && localJob.log.length
+            ? h("div", { className: "vsub-log" }, localJob.log.slice(-40).join("\n"))
+            : null,
+        ),
+
+        // 4. 来源健康状况
         h(
           "div",
           { className: "vsub-card" },
@@ -389,7 +464,7 @@ window.__ModuleLoader__.load({
               (p.placeholder || p.note || "可用")))),
         ),
 
-        // 4. 常用设置
+        // 5. 常用设置
         h(
           "div",
           { className: "vsub-card" },

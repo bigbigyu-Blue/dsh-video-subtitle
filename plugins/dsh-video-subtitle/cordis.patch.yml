@@ -63,7 +63,8 @@
         localMaxMinutes: 240
         # 多语言轨时，取前多少秒音频判断原文语种（0 = 不探测）
         localProbeSec: 60
-        # 留空 = 自动查找（ffmpeg 从 imageio-ffmpeg / PATH；sherpa 原生模块从 DSH 安装目录；模型从 <DSH_HOME>/speech-to-text）
+        # 留空 = 用一键安装装好的位置（<DSH_HOME>/video-subtitle/local），没装过再退到老位置自动查找
+        # （ffmpeg 从 imageio-ffmpeg / PATH；sherpa 原生模块从 DSH 安装目录；模型从 <DSH_HOME>/speech-to-text）
         ffmpegPath: ''
         sherpaAddonPath: ''
         senseVoiceModel: ''

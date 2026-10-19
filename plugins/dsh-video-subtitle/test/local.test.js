@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import { runProcess, availability } from "../lib/providers/local.js";
 
 const node = process.execPath;
@@ -56,9 +57,18 @@ test("两个子进程并行，总耗时不叠加", async () => {
 });
 
 test("可用性检查：缺什么就列什么，全都有就说能用", () => {
-  const bad = availability({ ffmpegPath: "", sherpaAddonPath: "", senseVoiceModel: "", senseVoiceTokens: "" });
-  assert.equal(bad.ready, false);
-  assert.ok(bad.missing.length >= 1);
+  // 这台机器上可能已经真装好了本机识别那三样，结果就会随机器状态变。
+  // 把「家目录」临时指到一个不存在的目录，测的才是「什么都没装时」这一种情况。
+  const saved = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(path.sep, "vsub-not-installed", String(Date.now()));
+  try {
+    const bad = availability({ ffmpegPath: "", sherpaAddonPath: "", senseVoiceModel: "", senseVoiceTokens: "" });
+    assert.equal(bad.ready, false);
+    assert.ok(bad.missing.length >= 1);
+  } finally {
+    if (saved === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = saved;
+  }
   const ok = availability({
     ffmpegPath: node,
     sherpaAddonPath: node,

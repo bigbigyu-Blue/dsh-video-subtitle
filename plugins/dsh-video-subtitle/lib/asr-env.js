@@ -74,27 +74,49 @@ export function asrPaths(cfg = {}, { home } = {}) {
   let python = formalPython;
   let hfHome = formalHfHome;
   let reused = false;
+  // 临时目录必须跟着「实际要跑的那个解释器」走，不能一律指到插件正式位置：
+  // 复用老环境时解释器在 bili-duty 那棵树里，只有那棵树对它放行写入，
+  // 指到正式位置会直接 PermissionError，转写连开头都跑不起来。
+  let tmpRoot = path.join(root, "tmp");
 
   if (configuredPython || configuredHfHome) {
     // 用户明确指了路，就按用户的来；只指一半时另一半用正式位置。
     python = configuredPython || formalPython;
     hfHome = configuredHfHome || formalHfHome;
     reused = true;
+    tmpRoot = tmpNearPython(python);
   } else if (existsSync(legacyPython) && existsSync(path.join(legacyHfHome, "hub"))) {
     python = legacyPython;
     hfHome = legacyHfHome;
     reused = true;
+    tmpRoot = path.join(legacyRoot, "tmp");
   }
+
+  // 逐个备用：先试上面挑出来的那个，再试老环境旁边，最后才是插件正式位置。
+  const tmpCandidates = [...new Set([tmpRoot, path.join(legacyRoot, "tmp"), path.join(root, "tmp")])];
 
   return {
     root,
     python,
     hfHome,
     hub: path.join(hfHome, "hub"),
-    tmpRoot: path.join(root, "tmp"),
+    tmpRoot,
+    tmpCandidates,
     modelName,
     reused,
   };
+}
+
+/**
+ * 解释器旁边那个能写的临时目录。
+ *
+ * 标准虚拟环境是 <环境目录>/Scripts/python.exe，临时目录取 <环境目录的上一级>/tmp：
+ * 老环境 bili-duty 正好就是 bili-duty/tmp，和它自己那棵树一起被放行写；正式位置则是 <root>/tmp。
+ * 解释器不在 Scripts 下（比如直接指了个 python.exe）就退一步用它所在的目录下的 tmp。
+ */
+function tmpNearPython(python) {
+  const dir = path.dirname(python);
+  return path.basename(dir).toLowerCase() === "scripts" ? path.join(path.dirname(dir), "tmp") : path.join(dir, "tmp");
 }
 
 /** 模型目录可能有三种摆法，挨个认。 */

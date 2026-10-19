@@ -221,15 +221,16 @@ function resolvePaths(cfg) {
     // 0 表示关闭批处理，退回逐段转写
     batchSize: Math.max(0, Math.trunc(numOr(cfg.whisperBatchSize, 8))),
     maxChars: Math.max(4, Math.trunc(numOr(cfg.whisperMaxChars, 24))),
-    // 系统临时目录在受限环境下不可写（mkdtemp 报 EPERM），所以优先用模型缓存旁边
-    // 已经存在的目录；都不可写时再退回系统临时目录。
+    // 系统临时目录在受限环境下不可写（建子目录会被系统拦住），所以临时目录一律放在
+    // 实际要跑的那个解释器旁边 —— asr-env 已经算好，这里连同备用位置一起拿过来。
     tmpRoot: cfg.whisperTmpDir || process.env.DSH_WHISPER_TMP || env.tmpRoot,
+    tmpCandidates: env.tmpCandidates ?? [],
   };
 }
 
-/** 找一个真能建目录的地方当临时工作区，找不到就用系统临时目录（可能失败，但那是环境问题）。 */
-async function makeTmpDir(root) {
-  const candidates = [root, os.tmpdir()].filter(Boolean);
+/** 找一个真能建目录的地方当临时工作区；个个都不行就把试过的地方和最后一个错都写出来。 */
+export async function makeTmpDir(root, extra = []) {
+  const candidates = [...new Set([root, ...extra, os.tmpdir()].filter(Boolean))];
   let lastErr = null;
   for (const base of candidates) {
     try {
@@ -239,7 +240,10 @@ async function makeTmpDir(root) {
       lastErr = e;
     }
   }
-  throw lastErr ?? new Error("找不到可写的临时目录");
+  throw new Error(
+    "转写用的临时目录都建不了（" + candidates.join("、") + "）：" + (lastErr?.message ?? lastErr) +
+      "。可以在插件配置里把 whisperTmpDir 指到一个能写的目录。",
+  );
 }
 
 /** 本机到底能不能跑：python 在不在、模型缓存有没有。给 providersStatus 用。 */
@@ -346,7 +350,7 @@ export async function fetchSubtitles({ meta, ctx }) {
     /* ignore */
   }
 
-  const tmp = await makeTmpDir(p.tmpRoot);
+  const tmp = await makeTmpDir(p.tmpRoot, p.tmpCandidates);
   const m4s = path.join(tmp, "a.m4s");
   const script = path.join(tmp, "asr.py");
   const outJson = path.join(tmp, "out.json");
@@ -372,7 +376,15 @@ export async function fetchSubtitles({ meta, ctx }) {
       { timeoutMs, signal: ctx.signal },
     );
     if (!existsSync(outJson)) {
-      throw ctx.error(id, "LOCAL_ASR_FAILED", `转写脚本没有产出结果 status=${run.status} ${String(run.stderr || "").slice(-300)}`);
+      const err = String(run.stderr || "");
+      if (/PermissionError|Permission denied/i.test(err)) {
+        throw ctx.error(
+          id,
+          "LOCAL_ASR_FAILED",
+          `转写跑完了但写不出结果文件，系统不让往 ${tmp} 里写（老环境里的 Python 只能写它自己那棵树）。换个临时目录或者把插件配置里的 whisperTmpDir 指到能写的位置。原始报错：${err.slice(-200)}`,
+        );
+      }
+      throw ctx.error(id, "LOCAL_ASR_FAILED", `转写脚本没有产出结果 status=${run.status} ${err.slice(-300)}`);
     }
     const parsed = JSON.parse(await fs.readFile(outJson, "utf8"));
     if (!parsed.ok) throw ctx.error(id, "LOCAL_ASR_FAILED", String(parsed.error || "转写失败").slice(0, 300));

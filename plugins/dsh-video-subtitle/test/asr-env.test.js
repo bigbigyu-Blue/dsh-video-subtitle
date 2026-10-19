@@ -126,6 +126,8 @@ test("asrPaths：配置里明确写了就用配置值，并标成复用", () => 
   assert.equal(p.hub, path.join("D:\\自己装的\\cache", "hub"));
   assert.equal(p.root, path.join(home, "video-subtitle", "asr"));
   assert.equal(p.modelName, "small");
+  // 自己指的 python 也放在它旁边的 tmp，不去碰插件正式位置
+  assert.equal(p.tmpRoot, path.join("D:\\自己装的", "tmp"));
 });
 
 test("asrPaths：老环境还在就接着用，不逼人重装", () => {
@@ -140,6 +142,10 @@ test("asrPaths：老环境还在就接着用，不逼人重装", () => {
   assert.equal(p.reused, true);
   assert.equal(p.python, legacyPython);
   assert.equal(p.hfHome, path.join(home, "bili-duty", ".hf-cache"));
+  // 临时目录必须跟着老环境走：老环境的解释器只能写自己那棵树，指到正式位置会直接报权限错
+  assert.equal(p.tmpRoot, path.join(home, "bili-duty", "tmp"));
+  assert.ok(p.tmpCandidates.includes(p.tmpRoot));
+  assert.ok(p.tmpCandidates.includes(path.join(home, "video-subtitle", "asr", "tmp")));
 });
 
 test("asrPaths：什么都没有就用插件自己的正式位置", () => {

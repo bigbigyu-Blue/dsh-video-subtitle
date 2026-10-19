@@ -1,6 +1,15 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { splitWordsToCues, availability } from "../lib/providers/whisper.js";
+import { splitWordsToCues, availability, makeTmpDir } from "../lib/providers/whisper.js";
+import { mkdirSync, mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// 临时目录开在仓库内的 test 目录下，不走系统临时目录（受限环境下那里建不了目录）。
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const TMP_BASE = path.join(HERE, ".tmp-whisper-" + process.pid);
+mkdirSync(TMP_BASE, { recursive: true });
+after(() => rmSync(TMP_BASE, { recursive: true, force: true }));
 
 /** 造词：w(text, start, end) */
 const w = (text, start, end) => ({ text, start, end });
@@ -71,4 +80,33 @@ test("缺 python 时 availability 报不可用并说明缺什么", () => {
   const r = availability({ whisperPython: "D:\\no-such-dir-xyz\\python.exe" });
   assert.equal(r.ready, false);
   assert.ok(r.missing.some((m) => m.includes("Python")), `missing 里没有 Python 说明：${r.missing.join(" / ")}`);
+});
+
+test("首选临时目录建不了，就退到备用目录", async () => {
+  const good = mkdtempSync(path.join(TMP_BASE, "good-"));
+  // 拿一个普通文件当目录用，必定建不进去
+  const blocker = path.join(good, "占位文件");
+  writeFileSync(blocker, "");
+  try {
+    const tmp = await makeTmpDir(path.join(blocker, "下面"), [good]);
+    assert.ok(tmp.startsWith(good), `临时目录没落在备用位置：${tmp}`);
+    assert.ok(existsSync(tmp), "临时目录没有真的建出来");
+    rmSync(tmp, { recursive: true, force: true });
+  } finally {
+    rmSync(good, { recursive: true, force: true });
+  }
+});
+
+test("所有临时目录都建不了时，报错里写清试过哪些地方", async () => {
+  const root = mkdtempSync(path.join(TMP_BASE, "bad-"));
+  const blocker = path.join(root, "占位文件");
+  writeFileSync(blocker, "");
+  try {
+    await assert.rejects(
+      () => makeTmpDir(path.join(blocker, "甲"), [path.join(blocker, "乙")]),
+      (e) => /临时目录都建不了/.test(e.message) && /whisperTmpDir/.test(e.message),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -63,11 +63,10 @@ function readOne(file, label) {
     return { cookie: "", source: "", detail: `${label}读不出来：${e?.message ?? e}`, file, mtimeMs: st.mtimeMs };
   }
   const cookie = fromObject(obj);
-  const missing = Object.keys(FIELDS).filter((k) => !String(obj?.[k] ?? obj?.[FIELDS[k]] ?? "").trim());
   const who = String(obj?.uname ?? "").trim();
-  const detail = cookie
-    ? `${label}已加载${who ? `（${who}）` : ""}${missing.length ? `，缺字段 ${missing.join("/")}` : ""}`
-    : `${label}里没有 SESSDATA`;
+  // 只报「有没有 SESSDATA」就够了：buvid3、bili_jct 这些缺了也不影响拿官方字幕，
+  // 实测带不带得到的轨完全一样，写在界面上只会让人以为出了故障。
+  const detail = cookie ? `${label}已加载${who ? `（${who}）` : ""}` : `${label}里没有 SESSDATA`;
   const hit = { cookie, source: cookie ? "file" : "", detail, file: cookie ? file : "", mtimeMs: st.mtimeMs };
   if (cookie) Object.assign(cache, hit);
   return hit;
@@ -75,7 +74,7 @@ function readOne(file, label) {
 
 /**
  * @returns {{cookie:string, source:string, detail:string}} cookie 为空串表示没找到凭据。
- * detail 是给人看的说明，写清楚凭据从哪来、缺没缺字段，但绝不包含任何凭据值。
+ * detail 是给人看的说明，只写清凭据从哪来（和登录名），绝不包含任何凭据值，也不报缺了哪个次要字段。
  */
 export function loadCredential(cfg = {}) {
   const inline = String(cfg.biliCookie ?? "").trim();

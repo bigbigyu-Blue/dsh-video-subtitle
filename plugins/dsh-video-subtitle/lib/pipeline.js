@@ -549,7 +549,7 @@ export function providersStatus(cfg = {}) {
         const av = checker.availability(cfg);
         if (av.ready) {
           // native 就绪时把「凭据从哪来」写出来：拿不到官方 AI 字幕时，第一条要查的就是凭据还在不在。
-          // availability 的 detail 只说明来源与缺没缺字段，不含任何凭据值。
+          // availability 的 detail 只说明凭据来源（和登录名），不含任何凭据值。
           if (pid === "native") note = av.detail;
         } else {
           missing = av.missing;

@@ -73,10 +73,16 @@ function makeConfig(getCfg) {
   return () => effectiveConfig(getCfg() ?? {});
 }
 
-/** 登录状态：先看插件配置里直写的 Cookie，再看扫码登录存下的文件，最后看历史凭据文件。 */
+/**
+ * 登录状态：先看插件配置里直写的 Cookie，再看扫码登录存下的文件，最后看历史凭据文件。
+ *
+ * 返回的 expired 是给界面用的标记：true 表示「以前登录过，现在这份凭据不管用了」，
+ * 和「从来就没登录过」必须分开说 —— 前者要人重新扫一次码，后者只是还没开始。
+ */
 async function loginState(cfg, { request } = {}) {
   const saved = readSaved({});
   const cred = loadCredential(cfg);
+  const who = saved.uname || "";
   if (cred.cookie) {
     let nav = null;
     try {
@@ -87,16 +93,43 @@ async function loginState(cfg, { request } = {}) {
     if (nav?.isLogin) {
       return {
         loggedIn: true,
-        uname: nav.uname || saved.uname || "",
+        expired: false,
+        uname: nav.uname || who,
         mid: nav.mid || saved.mid || "",
         vip: nav.vip === true,
         source: cred.source,
         detail: cred.detail,
       };
     }
-    return { loggedIn: false, uname: "", mid: "", source: cred.source, detail: `登录凭据已失效：${cred.detail}` };
+    // nav 是 null 说明校验这一步根本没问成（断网、被挡），不能算过期：
+    // 凭据可能还是好的，凭这个催人重新扫码只会白折腾一次。
+    if (!nav) {
+      return {
+        loggedIn: false,
+        expired: false,
+        uname: who,
+        mid: saved.mid || "",
+        source: cred.source,
+        detail: `连不上 B站，暂时查不了登录状态（${cred.detail}）`,
+      };
+    }
+    return {
+      loggedIn: false,
+      expired: true,
+      uname: who,
+      mid: saved.mid || "",
+      source: cred.source,
+      detail: `登录凭据已经失效${who ? `（${who}）` : ""}，重新扫一次码就好`,
+    };
   }
-  return { loggedIn: false, uname: "", mid: "", source: "", detail: "还没有登录 B站，官方字幕只能拿到公开的那几条" };
+  return {
+    loggedIn: false,
+    expired: false,
+    uname: "",
+    mid: "",
+    source: "",
+    detail: "还没有登录 B站，官方字幕只能拿到公开的那几条",
+  };
 }
 
 /**
@@ -104,7 +137,7 @@ async function loginState(cfg, { request } = {}) {
  * @param ctx Cordis 上下文（要能拿到 webServer 与 effect）
  * @param options {getCfg, version}
  */
-export function registerApiRoutes(ctx, { getCfg, version = "" } = {}) {
+export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
   const config = makeConfig(getCfg);
   const routes = [];
   const add = (method, path, handler) => routes.push({ method, path, handler });
@@ -112,7 +145,7 @@ export function registerApiRoutes(ctx, { getCfg, version = "" } = {}) {
   add("GET", `${PREFIX}/status`, async (req, res) => {
     const cfg = config();
     const [login, asr] = await Promise.all([
-      loginState(cfg).catch((e) => ({ loggedIn: false, detail: String(e?.message ?? e) })),
+      loginState(cfg, { request }).catch((e) => ({ loggedIn: false, expired: false, detail: String(e?.message ?? e) })),
       asrStatus(cfg).catch((e) => ({ ready: false, steps: [], error: String(e?.message ?? e) })),
     ]);
     const providers = providersStatus(cfg).map((p) => ({

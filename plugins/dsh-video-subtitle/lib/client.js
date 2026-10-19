@@ -46,6 +46,7 @@ window.__ModuleLoader__.load({
       ".vsub-badge.bad{color:#dc2626;border-color:#dc262655}",
       ".vsub-card.next{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}",
       ".vsub-next{font-size:12px;color:#3b82f6;border:1px solid #3b82f655;border-radius:999px;padding:1px 8px}",
+      ".vsub-alert{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid #f59e0b66;background:#f59e0b14;border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.6}",
       ".vsub-field{display:grid;grid-template-columns:170px 1fr;gap:10px;align-items:center;font-size:13px}",
       ".vsub-field input[type=text],.vsub-field input[type=number],.vsub-field select{width:100%;box-sizing:border-box;padding:6px 8px;border-radius:8px;border:1px solid var(--dsw-alias-border-secondary,rgba(127,127,127,.35));background:transparent;color:inherit;font-size:13px}",
       ".vsub-log{max-height:220px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;background:rgba(127,127,127,.08);border-radius:8px;padding:10px}",
@@ -299,6 +300,15 @@ window.__ModuleLoader__.load({
       const cardCls = (key) => "vsub-card" + (nextStep === key ? " next" : "");
       const nextTag = (key) => (nextStep === key ? h("span", { className: "vsub-next" }, "先做这个") : null);
 
+      // 以前登录过、凭据已经不管用了：在最上面先提醒一次，别等人去取字幕失败才发现
+      const expiredBar = login && login.expired
+        ? h("div", { className: "vsub-alert" },
+            h("span", null, textOf(login.detail, "登录凭据已经失效，重新扫一次码就好")),
+            h("span", { style: { flex: 1 } }),
+            h("button", { className: "vsub-btn primary", onClick: () => setShowLogin(true), disabled: busy === "login" }, "重新扫码"),
+          )
+        : null;
+
       return h(
         "div",
         { className: "vsub-root" },
@@ -306,6 +316,7 @@ window.__ModuleLoader__.load({
           h("p", { className: "vsub-muted" }, props.subtitle || "取 B站 视频字幕：官方字幕要登录，登录一次就好。")),
 
         error ? h("p", { className: "vsub-muted", style: { color: "#dc2626" } }, error) : null,
+        expiredBar,
 
         // 1. 登录
         h(
@@ -317,7 +328,7 @@ window.__ModuleLoader__.load({
             h("h3", null, "B站 登录"),
             nextTag("login"),
             h("span", { className: "vsub-badge " + (login && login.loggedIn ? "ok" : "bad") },
-              login && login.loggedIn ? "已登录" : "未登录"),
+              login && login.loggedIn ? "已登录" : login && login.expired ? "已失效" : "未登录"),
             login && login.loggedIn && login.uname ? h("span", { className: "vsub-muted" }, login.uname) : null,
             h("span", { style: { flex: 1 } }),
             h("button", { className: "vsub-btn " + (login && login.loggedIn ? "" : "primary"), onClick: () => setShowLogin(true), disabled: busy === "login" },
@@ -331,7 +342,8 @@ window.__ModuleLoader__.load({
             login && login.loggedIn
               ? "登录后能拿到官方 AI 字幕，通常是秒级返回，而且不用本机转写，又快又准。"
               : "不登录也能取到一部分公开字幕，但官方 AI 字幕必须登录。点上面的按钮，用手机 B站 扫一下就成。"),
-          login && !login.loggedIn && login.detail ? h("p", { className: "vsub-muted", style: { fontSize: 12 } }, login.detail) : null,
+          // 失效的情况上面那条提醒已经说清了，这里不再重复一遍
+          login && !login.loggedIn && !login.expired && login.detail ? h("p", { className: "vsub-muted", style: { fontSize: 12 } }, login.detail) : null,
           loginTip ? h("p", { className: "vsub-muted", style: { fontSize: 12, color: "#0f766e" } }, loginTip) : null,
         ),
 

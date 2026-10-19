@@ -24,7 +24,7 @@ const SRT = [
   "",
   "3",
   "0:0:8,20 --> 0:0:10,75",
-  "第三句（第三方站的短写法）",
+  "第三句（短时间写法）",
   "",
 ].join("\n");
 
@@ -47,7 +47,7 @@ test("识别引擎结果转字幕，空文本跳过", () => {
   assert.equal(blocks[1].start, 2);
 });
 
-test("解析能容忍第三方站的短时间写法", () => {
+test("解析能容忍短时间写法", () => {
   const blocks = parseSrtBlocks(SRT);
   assert.equal(blocks.length, 3);
   assert.equal(blocks[2].start, 8.2);

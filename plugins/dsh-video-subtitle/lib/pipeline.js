@@ -12,7 +12,6 @@ import os from "node:os";
 import { parseVideoInput, resolveShortLink, resolveBilibiliMeta } from "./ids.js";
 import { readSlice, srtStats, langSlug, langMatches, detectScriptLang, timelineIssues } from "./srt.js";
 import * as nativeProvider from "./providers/native.js";
-import * as feiyudoProvider from "./providers/feiyudo.js";
 import * as localProvider from "./providers/local.js";
 import * as whisperProvider from "./providers/whisper.js";
 import { probeLanguage } from "./providers/local.js";
@@ -23,7 +22,6 @@ const UA =
 
 export const PROVIDERS = {
   native: nativeProvider,
-  feiyudo: feiyudoProvider,
   whisper: whisperProvider,
   local: localProvider,
 };
@@ -373,7 +371,7 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
         recordAttempt(pid, "EMPTY", "provider 返回空字幕");
         continue;
       }
-      // 时间轴不可信的轨直接剔除：第三方站偶尔整条时间轴错位，文字对但按时间读会读到错的地方
+      // 时间轴不可信的轨直接剔除：某些源会把整条时间轴写错位，文字对但按时间读会读到错的地方
       const valid = tracks.filter((t) => timelineIssues(t.content, meta.durationS).ok);
       if (!valid.length) {
         const first = pickTrack(tracks, prefer);
@@ -559,13 +557,6 @@ export function providersStatus(cfg = {}) {
         }
       } catch (e) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;
-      }
-    }
-    if (pid === "feiyudo" && typeof feiyudoProvider.quotaStatus === "function") {
-      try {
-        note = feiyudoProvider.quotaStatus(cfg).detail;
-      } catch {
-        /* 额度说明拿不到不影响状态清单 */
       }
     }
     return {

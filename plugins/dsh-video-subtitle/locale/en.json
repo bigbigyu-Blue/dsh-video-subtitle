@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Video Subtitle Downloader",
-    "description": "Fetch a Bilibili video's subtitles into a local subtitle file. Hits the official subtitle API first (with the local login credential and WBI signing, usually back in a second), then a third-party subtitle site, local faster-whisper transcription and local speech recognition. Can fetch many videos or every 分P of a collection in one call, and can merge fragment subtitles into readable sentences plus a plain transcript. Returns only metadata (title, duration, character counts, file paths) — the transcript itself is read on demand by time range."
+    "description": "Fetch a Bilibili video's subtitles into a local subtitle file. Hits the official subtitle API first (with the local login credential and WBI signing, usually back in a second), then local faster-whisper transcription and local speech recognition. Can fetch many videos or every 分P of a collection in one call, and can merge fragment subtitles into readable sentences plus a plain transcript. Returns only metadata (title, duration, character counts, file paths) — the transcript itself is read on demand by time range."
   }
 }

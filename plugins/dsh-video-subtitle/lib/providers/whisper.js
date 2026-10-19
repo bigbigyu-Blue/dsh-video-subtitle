@@ -1,8 +1,8 @@
 /**
- * Provider `whisper` — 本机 faster-whisper 转写，不依赖任何第三方站点、没有次数限制。
+ * Provider `whisper` — 本机 faster-whisper 转写，不依赖任何外部服务、没有次数限制。
  *
- * 为什么单独一个源：第三方站每天只放几次，官方源要登录且长视频字幕只覆盖一小段，
- * 必剪（bcut）对匿名请求限流。本机已经装好 faster-whisper（Python 虚拟环境 + small 模型），
+ * 为什么单独一个源：官方源要登录，且长视频的官方字幕只覆盖开头一小段（实测 40 小时的
+ * 视频只给开头几分钟），这时候只能靠本机转写。本机已经装好 faster-whisper（Python 虚拟环境 + small 模型），
  * 音频直接用 PyAV 解码，不需要 ffmpeg，是唯一一个「任何视频都能转、且不会用完」的来源。
  *
  *   dash audio (anonymous playurl) -> .m4s

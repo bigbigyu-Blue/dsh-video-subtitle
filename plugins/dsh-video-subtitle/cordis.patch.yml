@@ -9,7 +9,7 @@
         enabled: true
         # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
         # native 是主力源：B站 官方 AI 字幕要「登录凭据 + WBI 签名」才给地址，匿名拿不到
-        providerOrder: ['native', 'feiyudo', 'whisper', 'local']
+        providerOrder: ['native', 'whisper', 'local']
         # 固定字幕落盘目录；留空 = 交给下面的 saveToWorkspace 策略
         saveDir: ''
         # true = 写进「发起这次调用的那个会话自己的工作区」，每次调用实时解析会话工作区路径，
@@ -21,19 +21,12 @@
         preferLang: ['zh', 'en']
         # 单个 provider 的超时（毫秒）
         timeoutMs: 90000
-        # 第三方字幕站基地址（站点换域名时改这里）
-        feiyudoBaseUrl: 'https://www.feiyudo.com'
-        # 第三方站调用最小间隔（毫秒）——自控频率，防滥用
-        feiyudoMinIntervalMs: 3000
-        # 第三方站每天最多取几条（0 = 不自己限制，完全听站点的）。跨天自动归零，
-        # 站点自己回「今日次数已达上限」时当天不再白打请求
-        feiyudoDailyMax: 20
         # B站 登录凭据：只在本机内存里用，不打印、不写回、不上传
         # 留空 = 自动读 <DSH_HOME>/bili-duty/bili_credential.json
         # 也可以直接把一整条 Cookie 串写进 biliCookie
         biliCookie: ''
         biliCredentialFile: ''
-        # 本机 faster-whisper 转写（不依赖第三方、无次数限制，代价是慢）
+        # 本机 faster-whisper 转写（不依赖外部服务、无次数限制，代价是慢）
         # python 环境与模型缓存留空 = 自动找 <DSH_HOME>/bili-duty 下现成的那套
         whisperPython: ''
         whisperHfHome: ''

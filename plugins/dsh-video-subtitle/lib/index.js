@@ -40,16 +40,13 @@ const inject = ["tools", "systemPrompt"];
 /** Deployment-tunable config, filled by the loader from the patch row. */
 const Config = z.object({
   enabled: z.boolean().default(true),
-  providerOrder: z.array(z.string()).default(["native", "feiyudo", "whisper", "local"]),
+  providerOrder: z.array(z.string()).default(["native", "whisper", "local"]),
   saveDir: z.string().default(""),
   saveToWorkspace: z.boolean().default(true),
   workspaceSubdir: z.string().default(".subtitles"),
   preferLang: z.array(z.string()).default(["zh", "en"]),
   timeoutMs: z.number().default(90000),
-  feiyudoBaseUrl: z.string().default("https://www.feiyudo.com"),
-  feiyudoMinIntervalMs: z.number().default(3000),
-  feiyudoDailyMax: z.number().default(20),
-  // 本机 faster-whisper 转写（无第三方、无次数限制，代价是慢）
+  // 本机 faster-whisper 转写（不依赖外部服务、无次数限制，代价是慢）
   whisperPython: z.string().default(""),
   whisperHfHome: z.string().default(""),
   whisperTmpDir: z.string().default(""),
@@ -86,10 +83,10 @@ const SYSTEM_PROMPT = [
   "【落盘位置】默认写进发起这次调用的那个会话自己的工作区，子目录 workspaceSubdir（默认 .subtitles）；取不到会话工作区才退回 <DSH_HOME>/subtitles。传 dir 参数可指定别处。",
   "【读正文】subtitle_read(path, from, to, max_chars)：按时间区间分段读。20 分钟视频约 2.5 万字，禁止一次整篇读。",
   "【失败处理】subtitle_fetch 返回 ok:false 时，把 attempts[] 里每个 provider 的原因如实转述，不要编造字幕内容，不要改用别的视频替代，也不要声称已获取。",
-  "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（第三方站点改版、抽签失败在这里一眼可见）。",
+  "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（哪个源缺什么、上次为什么失败，在这里一眼可见）。",
   "【批量】subtitle_batch(urls, parts, lang, dir, force, max_items)：一次取多条。urls 给数组或一整段粘贴的文本（换行/逗号分隔都行）；parts=true 时先把合集的分P全部展开再逐个取，适合多集课程/连续剧。某一条失败不影响其它条，每条都有独立结果；条数超上限时如实告诉你还剩几条没取。",
   "【整理】subtitle_polish(path, dir, max_gap, max_chars)：把取回来的 .srt 拼回通顺句子并补标点，另写一份纯文稿 .txt。只做拼接和插入标点，一个原字都不改、不译、不删。B站 官方 AI 字幕是逐句短碎片、完全没有标点，要给人读或做总结就先用它整理一遍。",
-  "provider 顺序默认 native→feiyudo→whisper→local，在 profile 的 cordis.patch.yml 里可改；第三方站换域名改 feiyudoBaseUrl。",
+  "provider 顺序默认 native→whisper→local，在 profile 的 cordis.patch.yml 里可改。",
   "native 是主力源：B站 官方 AI 字幕轨要「已登录 + WBI 签名」才会返回地址，匿名拿不到。插件自动读本机已有登录凭据（biliCredentialFile 或 biliCookie），通常在 1 秒内返回。拿不到时先看 subtitle_providers 里 native 那行写的凭据状态，不要去猜视频没有字幕。",
   "whisper 是本机转写，任何有声音的视频都能转但慢（约每分钟音频 8 秒），没有次数限制；它转的是整段音频，结果标记为完整。",
 ].join("\n");

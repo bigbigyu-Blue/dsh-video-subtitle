@@ -17,6 +17,8 @@
  *
  * @module dsh-video-subtitle
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import z from "@deepseek-ai/schemastery";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import {
@@ -30,9 +32,21 @@ import {
 } from "./pipeline.js";
 import { batchFetch } from "./batch.js";
 import { clock } from "./srt.js";
+import { effectiveConfig, describeSettings } from "./settings.js";
+import { registerApiRoutes } from "./api.js";
 
 /** Cordis plugin name used by loader diagnostics. */
 const name = "videosub";
+
+/** 版本号直接从 package.json 读，免得两个地方各写一份对不上。 */
+const VERSION = (() => {
+  try {
+    const file = fileURLToPath(new URL("../package.json", import.meta.url));
+    return String(JSON.parse(readFileSync(file, "utf8")).version ?? "");
+  } catch {
+    return "";
+  }
+})();
 
 /** Services required by the tool plugin. */
 const inject = ["tools", "systemPrompt"];
@@ -214,6 +228,8 @@ function fmtStatus(v) {
 function apply(ctx, config) {
   const cfg = { ...(config ?? {}) };
   if (cfg.enabled === false) return;
+  // 每次真要干活时重新算一遍：界面上的设置存盘后立刻生效，不用重启插件
+  const cfgNow = () => effectiveConfig(cfg);
   const log = (m) => {
     try {
       ctx.logger?.info?.(m);
@@ -224,12 +240,17 @@ function apply(ctx, config) {
 
   ctx.systemPrompt.section({ name: "tool:video_subtitle", order: 165, text: SYSTEM_PROMPT });
 
+  // 设置页用的 HTTP 接口。宿主没开 webServer 就只是没有设置页，取字幕不受影响，所以不写进 inject。
+  ctx.inject(["webServer"], (host) => {
+    host.effect(() => registerApiRoutes(host, { getCfg: cfgNow, version: VERSION }), "dsh-video-subtitle: http routes");
+  });
+
   ctx.tools.register(
     defineTool({
       name: "subtitle_fetch",
       description:
         "Fetch a video's subtitles into a local .srt file through a fallback provider chain " +
-        "(bilibili native API -> third-party extractor -> local faster-whisper ASR -> local SenseVoice ASR). " +
+        "(bilibili official API with your local login credential -> local faster-whisper ASR -> local SenseVoice ASR). " +
         "Returns metadata only (title, duration, per-track character counts, absolute file paths); the " +
         "transcript text is NOT returned — read it on demand with subtitle_read. A result counts as success " +
         "only when the transcript covers at least fullCoveragePct (default 90%) of the video; anything shorter " +
@@ -259,7 +280,7 @@ function apply(ctx, config) {
           lang: args.lang,
           dir: args.dir,
           force: args.force === true,
-          cfg,
+          cfg: cfgNow(),
           signal: exec.signal,
           log,
           workspaceRoot: exec?.agent?.session?.header?.cwd ?? "",
@@ -341,7 +362,7 @@ function apply(ctx, config) {
           lang: args.lang,
           dir: args.dir,
           force: args.force === true,
-          cfg,
+          cfg: cfgNow(),
           signal: exec.signal,
           log,
           workspaceRoot: exec?.agent?.session?.header?.cwd ?? "",
@@ -389,8 +410,8 @@ function apply(ctx, config) {
       name: "subtitle_providers",
       description:
         "Report the subtitle provider chain: which providers are wired, and each one's last attempt " +
-        "result and reason. Use it to diagnose a failed fetch, or to check whether the third-party " +
-        "subtitle site changed its API.",
+        "result and reason. Use it to diagnose a failed fetch, or to see whether the login credential " +
+        "still works and whether the local speech environment is installed.",
       parameters: {},
       output: {
         schema: { type: "json" },
@@ -398,15 +419,17 @@ function apply(ctx, config) {
       },
       timeoutMs: 15000,
       async execute() {
-        const subdir = cfg.workspaceSubdir || ".subtitles";
-        const fallbackDir = cfg.saveDir || defaultSaveDir();
+        const live = cfgNow();
+        const subdir = live.workspaceSubdir || ".subtitles";
+        const fallbackDir = live.saveDir || defaultSaveDir();
         return {
-          providers: providersStatus(cfg),
-          order: cfg.providerOrder ?? [],
-          saveToWorkspace: cfg.saveToWorkspace !== false,
+          providers: providersStatus(live),
+          order: live.providerOrder ?? [],
+          saveToWorkspace: live.saveToWorkspace !== false,
           workspaceSubdir: subdir,
           fallbackDir,
-          saveDir: cfg.saveToWorkspace === false ? fallbackDir : `<会话工作区>\\${subdir}`,
+          saveDir: live.saveToWorkspace === false ? fallbackDir : `<会话工作区>\\${subdir}`,
+          settings: describeSettings(cfg),
         };
       },
     }),

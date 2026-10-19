@@ -1,6 +1,8 @@
 # dsh-video-subtitle bundle patch — one insert row over the profile tree.
 # Defaults live here; override any field in profiles/<profile>/cordis.patch.yml
 # (later layers win per row).
+# 普通人不用改这里：设置里的「视频字幕」页改的值写在 <DSH_HOME>/video-subtitle/settings.json，
+# 读的时候盖在这份默认值上面，改完立刻生效，不用重启。
 - insert:
     - id: videosub
       name: 'dsh-video-subtitle'
@@ -10,27 +12,30 @@
         # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
         # native 是主力源：B站 官方 AI 字幕要「登录凭据 + WBI 签名」才给地址，匿名拿不到
         providerOrder: ['native', 'whisper', 'local']
-        # 固定字幕落盘目录；留空 = 交给下面的 saveToWorkspace 策略
+        # 固定字幕保存目录；留空 = 交给下面的 saveToWorkspace 策略
         saveDir: ''
         # true = 写进「发起这次调用的那个会话自己的工作区」，每次调用实时解析会话工作区路径，
         # 新建的会话/新建的工作区照样生效（不是写死某几个目录）
         saveToWorkspace: true
-        # 会话工作区里的子目录名；插件落盘时自动创建，不是提前建好的目录
+        # 会话工作区里的子目录名；写文件时自动创建，不是提前建好的目录
         workspaceSubdir: '.subtitles'
         # 语言偏好（按顺序取第一条命中的字幕轨）
         preferLang: ['zh', 'en']
         # 单个 provider 的超时（毫秒）
         timeoutMs: 90000
         # B站 登录凭据：只在本机内存里用，不打印、不写回、不上传
-        # 留空 = 自动读 <DSH_HOME>/bili-duty/bili_credential.json
-        # 也可以直接把一整条 Cookie 串写进 biliCookie
+        # 日常不用填这里：到「设置 → 视频字幕」页点扫码登录，用手机 B站 一扫就好
+        # biliCookie 留空 = 先用设置页扫码登录存下的 <DSH_HOME>/video-subtitle/bili-login.json，
+        # 其次兼容旧的 <DSH_HOME>/bili-duty/bili_credential.json
+        # biliCredentialFile 留空 = 按上面的顺序自动找；填了就只读填的那个文件
         biliCookie: ''
         biliCredentialFile: ''
         # 本机 faster-whisper 转写（不依赖外部服务、无次数限制，代价是慢）
-        # python 环境与模型缓存留空 = 自动找 <DSH_HOME>/bili-duty 下现成的那套
+        # 日常不用填：到「设置 → 视频字幕」页点一键安装，就装在 <DSH_HOME>/video-subtitle/asr 下
+        # python 环境与模型缓存留空 = 用一键安装的那套；本机已有旧的 bili-duty 那套就接着用，不逼人重装
         whisperPython: ''
         whisperHfHome: ''
-        # 转写临时文件放哪；留空自动用 <DSH_HOME>/bili-duty/tmp/asr（系统临时目录在受限环境下不可写）
+        # 转写临时文件放哪；留空用 <DSH_HOME>/video-subtitle/asr/tmp（系统临时目录在受限环境下可能不可写）
         whisperTmpDir: ''
         whisperModel: 'small'
         whisperThreads: 4

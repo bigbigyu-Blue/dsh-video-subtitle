@@ -20,6 +20,7 @@ import { Readable } from "node:stream";
 import path from "node:path";
 import os from "node:os";
 import { msToTimestamp } from "../srt.js";
+import { asrPaths } from "../asr-env.js";
 
 export const id = "whisper";
 const API = "https://api.bilibili.com";
@@ -209,10 +210,12 @@ function numOr(v, dflt) {
 }
 
 function resolvePaths(cfg) {
-  const bili = path.join(DSH_HOME, "bili-duty");
+  // 转写环境装在哪一套由 asr-env 统一算：界面上点「一键安装」装到插件自己的位置，
+  // 已经装过老环境（bili-duty）的机器直接沿用，不用重装。
+  const env = asrPaths(cfg);
   return {
-    python: cfg.whisperPython || process.env.DSH_WHISPER_PYTHON || path.join(bili, ".venv-asr", "Scripts", "python.exe"),
-    hfHome: cfg.whisperHfHome || path.join(bili, ".hf-cache"),
+    python: cfg.whisperPython || process.env.DSH_WHISPER_PYTHON || env.python,
+    hfHome: cfg.whisperHfHome || env.hfHome,
     model: cfg.whisperModel || "small",
     threads: Number(cfg.whisperThreads ?? cfg.localThreads ?? 4),
     // 0 表示关闭批处理，退回逐段转写
@@ -220,7 +223,7 @@ function resolvePaths(cfg) {
     maxChars: Math.max(4, Math.trunc(numOr(cfg.whisperMaxChars, 24))),
     // 系统临时目录在受限环境下不可写（mkdtemp 报 EPERM），所以优先用模型缓存旁边
     // 已经存在的目录；都不可写时再退回系统临时目录。
-    tmpRoot: cfg.whisperTmpDir || process.env.DSH_WHISPER_TMP || path.join(bili, "tmp", "asr"),
+    tmpRoot: cfg.whisperTmpDir || process.env.DSH_WHISPER_TMP || env.tmpRoot,
   };
 }
 
@@ -245,7 +248,7 @@ export function availability(cfg = {}) {
   const missing = [];
   if (!existsSync(p.python)) missing.push(`Python 环境（${p.python}）`);
   if (!existsSync(path.join(p.hfHome, "hub"))) missing.push(`模型缓存（${p.hfHome}）`);
-  if (p.tmpRoot && !existsSync(p.tmpRoot)) missing.push(`临时目录（${p.tmpRoot}）`);
+  // 临时目录缺了不算缺件：真开转写时会自己建（makeTmpDir），提前说成不可用只会让人白点一键安装
   return { ready: missing.length === 0, missing };
 }
 

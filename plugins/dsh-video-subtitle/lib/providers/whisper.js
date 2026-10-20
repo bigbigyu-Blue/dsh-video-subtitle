@@ -16,15 +16,13 @@
  */
 import { spawn } from "node:child_process";
 import { promises as fs, existsSync } from "node:fs";
-import { createWriteStream } from "node:fs";
-import { Readable } from "node:stream";
 import path from "node:path";
 import os from "node:os";
 import { msToTimestamp } from "../srt.js";
 import { asrPaths } from "../asr-env.js";
+import { fetchAudio } from "../audio.js";
 
 export const id = "whisper";
-const API = "https://api.bilibili.com";
 
 /** 句末标点：词尾遇到这些就把当前条目收掉。 */
 const FINAL_PUNCT = "。！？!?…";
@@ -540,45 +538,19 @@ export async function fetchSubtitles({ meta, ctx }) {
     throw ctx.error(id, "UNSUPPORTED", `视频 ${(meta.durationS / 60).toFixed(0)} 分钟，超过本地转写上限 ${maxMin} 分钟`);
   }
 
-  const headers = { Referer: "https://www.bilibili.com/" };
-  const pu = await ctx.request(
-    `${API}/x/player/playurl?bvid=${meta.bvid}&cid=${meta.cid}&fnval=16&qn=64&fourk=1`,
-    { headers, signal: ctx.signal },
-  );
-  const audio = pu?.data?.dash?.audio?.[0];
-  const audioUrl = audio?.baseUrl ?? audio?.base_url;
-  if (!audioUrl) throw ctx.error(id, "AUDIO_UNAVAILABLE", "dash.audio[0] 缺失");
-
-  // 匿名 playurl 对一部分视频只给「试看片段」（实测某 72 分钟视频只给 616 秒音频），
-  // dash.duration 会如实写出这个片段长度。不比对就会把「只转了一小段」当成整段转完。
-  const dashDur = Number(pu?.data?.dash?.duration ?? 0);
-  const fullS = Number(meta.durationS ?? 0);
-  if (dashDur > 0 && fullS > 0 && dashDur < fullS * 0.95) {
-    throw ctx.error(
-      id,
-      "AUDIO_TRUNCATED",
-      `匿名只有试看片段：音频 ${Math.round(dashDur)} 秒，视频 ${Math.round(fullS)} 秒（要完整音频得登录）`,
-    );
-  }
-  let host = "";
-  try {
-    host = new URL(audioUrl).host;
-  } catch {
-    /* ignore */
-  }
-
   const tmp = await makeTmpDir(p.tmpRoot, p.tmpCandidates);
-  const m4s = path.join(tmp, "a.m4s");
+  let audio;
+  try {
+    // 声音从哪来按平台分岔：B站 走官方接口，别的站交给下载器，转写这一段两边完全一样
+    audio = await fetchAudio({ meta, ctx, tmp, provider: id });
+  } catch (e) {
+    fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
+  const m4s = audio.path;
+  const host = audio.host;
   const outJson = path.join(tmp, "out.json");
   try {
-    const res = await ctx.fetchRaw(audioUrl, { headers, signal: ctx.signal });
-    if (!res.ok) throw ctx.error(id, "AUDIO_UNAVAILABLE", `音频下载 HTTP ${res.status}（主机 ${host}）`);
-    await new Promise((resolve, reject) => {
-      const ws = createWriteStream(m4s);
-      Readable.fromWeb(res.body).pipe(ws);
-      ws.on("finish", resolve);
-      ws.on("error", reject);
-    });
     // 常驻进程读的是这个脚本文件：每段转写前重写一遍，改完代码立刻生效，不用重启插件
     await fs.writeFile(p.script, SCRIPT, "utf8");
 

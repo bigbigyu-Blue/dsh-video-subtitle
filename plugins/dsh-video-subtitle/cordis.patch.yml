@@ -11,7 +11,8 @@
         enabled: true
         # provider 尝试顺序；每一项对应 lib/providers/<名字>.js，写错/缺文件则跳过
         # native 是主力源：B站 官方 AI 字幕要「登录凭据 + WBI 签名」才给地址，匿名拿不到
-        providerOrder: ['native', 'whisper', 'local']
+        # ytdlp 是「站上现成字幕」：B站 上它自己跳过，别的站用它取站上现成的字幕；没装时什么都不耽误
+        providerOrder: ['native', 'ytdlp', 'whisper', 'local']
         # 固定字幕保存目录；留空 = 交给下面的 saveToWorkspace 策略
         saveDir: ''
         # true = 写进「发起这次调用的那个会话自己的工作区」，每次调用实时解析会话工作区路径，
@@ -69,6 +70,9 @@
         sherpaAddonPath: ''
         senseVoiceModel: ''
         senseVoiceTokens: ''
+        # B站 以外的站要用的那个下载器：留空 = 用设置页一键安装装到插件自己目录里的那份
+        # 日常不用填：到「设置 → 视频字幕」页的「B站 以外的站用的下载器」卡片点一键安装
+        ytdlpPath: ''
         # 缓存有效期（天）：命中则不发任何请求
         cacheTtlDays: 30
         # 批量取字幕单次最多跑几条（合集有很多分P时防止一次跑太久）；被截掉的条数会如实报出来

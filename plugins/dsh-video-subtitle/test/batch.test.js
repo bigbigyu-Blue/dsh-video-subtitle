@@ -73,7 +73,7 @@ test("expandTargets：不带 ?p= 记 1，带 ?p= 保留页号", async () => {
   assert.equal(p3[0].page, 3);
 });
 
-test("expandTargets：youtube 链接与乱七八糟的字符串只给 skip 原因，不抛错", async () => {
+test("expandTargets：别的站链接照常收下，乱七八糟的字符串只给 skip 原因，不抛错", async () => {
   const targets = await expandTargets([
     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     "随便一段文字",
@@ -81,12 +81,21 @@ test("expandTargets：youtube 链接与乱七八糟的字符串只给 skip 原�
   ]);
 
   assert.equal(targets.length, 3);
-  assert.match(targets[0].skip, /只支持 bilibili/);
-  assert.match(targets[0].skip, /youtube/);
+  // 别的站不再跳过：原样交给下载器去取，失败由取字幕那一层如实报
+  assert.equal(targets[0].skip, undefined);
+  assert.equal(targets[0].videoId, "dQw4w9WgXcQ");
+  assert.equal(targets[0].page, 1);
   assert.match(targets[1].skip, /无法识别的视频链接/);
   // 坏输入不影响后面的正常链接
   assert.equal(targets[2].skip, undefined);
   assert.equal(targets[2].page, 1);
+});
+
+test("expandTargets：别的站不展开分P，一次只出一条", async () => {
+  const targets = await expandTargets(["https://vimeo.com/123456"], { parts: true });
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].url, "https://vimeo.com/123456");
+  assert.equal(targets[0].page, 1);
 });
 
 /** 假的取字幕：url 里带 bad 的一律失败，其它成功。 */

@@ -3,7 +3,7 @@
  *
  * 普通用户不该去翻配置文件，更不该自己去浏览器里抠 Cookie。这个页面做三件事：
  *   1. 点一下出二维码，手机 B站 扫一下就登录好了；
- *   2. Whisper 与 SenseVoice 两条本机路线各自缺什么，一键装；
+ *   2. Whisper 与 SenseVoice 两条本机路线各自缺什么，一键装；B站 以外的站要用的下载器也在这一页装；
  *   3. 常用的几项设置直接在这里改，改完立刻生效。
  *
  * 这是一个手写的客户端模块，不经过打包工具。工厂函数里只能同步拿到宿主预置的 react，
@@ -22,12 +22,12 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: "视频字幕",
       title: "视频字幕",
-      subtitle: "取 B站 视频字幕：B站官方字幕要登录，登录一次就好。",
+      subtitle: "取视频字幕：B站 要登录一次，别的站要先装一次下载器。",
     };
     const en = {
       nav: "Video subtitles",
       title: "Video subtitles",
-      subtitle: "Fetch Bilibili subtitles. Official subtitles need a one-time login.",
+      subtitle: "Fetch video subtitles: log in to Bilibili once, and install the downloader once for other sites.",
     };
 
     // ---------- 样式：自己插一个 style 标签，按 tagId 去重，热更新时不会叠一层又一层 ----------
@@ -182,6 +182,7 @@ window.__ModuleLoader__.load({
       const [showLogin, setShowLogin] = react.useState(false);
       const [asr, setAsr] = react.useState(null);
       const [localJob, setLocalJob] = react.useState(null);
+      const [ytdlpJob, setYtdlpJob] = react.useState(null);
       const [draft, setDraft] = react.useState({});
       const [savedTip, setSavedTip] = react.useState("");
       const [loginTip, setLoginTip] = react.useState("");
@@ -239,6 +240,25 @@ window.__ModuleLoader__.load({
         }, 1200);
         return () => clearInterval(id);
       }, [localRunning, load]);
+
+      // 下载器也在装的时候，同样每秒刷一次
+      const ytdlpRunning = ytdlpJob && ytdlpJob.running;
+      react.useEffect(() => {
+        if (!ytdlpRunning) return undefined;
+        const id = setInterval(async () => {
+          try {
+            const r = await call("/ytdlp/state");
+            setYtdlpJob(r);
+            if (r && r.running === false) {
+              clearInterval(id);
+              load();
+            }
+          } catch {
+            clearInterval(id);
+          }
+        }, 1200);
+        return () => clearInterval(id);
+      }, [ytdlpRunning, load]);
 
       const login = status && status.login ? status.login : null;
       const settings = (status && status.settings) || [];
@@ -333,14 +353,41 @@ window.__ModuleLoader__.load({
         }
       };
 
+      const startYtdlpSetup = async () => {
+        setBusy("ytdlp");
+        try {
+          const r = await call("/ytdlp/setup", { method: "POST", body: {} });
+          if (!r.ok) throw new Error(textOf(r.error, "启动安装失败"));
+          const s = await call("/ytdlp/state");
+          setYtdlpJob(s);
+        } catch (e) {
+          setSavedTip("启动安装失败：" + e.message);
+        } finally {
+          setBusy("");
+        }
+      };
+
+      const cancelYtdlpSetup = async () => {
+        try {
+          await call("/ytdlp/cancel", { method: "POST", body: {} });
+          const s = await call("/ytdlp/state");
+          setYtdlpJob(s);
+        } catch {
+          /* 取消失败就算了，用户还能再点一次 */
+        }
+      };
+
       const asrReady = status && status.asr ? status.asr.ready : false;
       const localReady = status && status.local ? status.local.ready : false;
+      const ytdlpReady = status && status.ytdlp ? status.ytdlp.ready === true : false;
       const localSteps = (localJob && localJob.steps) || (status && status.local && status.local.items) || [];
+      const ytdlpSteps = (ytdlpJob && ytdlpJob.steps) || [];
       const asrSteps = (asr && asr.steps) || (status && status.asr && status.asr.steps) || [];
 
       // 来源的名字写成中文，第四路是可选的，别让人以为哪里坏了
       // 名字必须让人一眼看出这是两个不同的引擎，不是同一个功能说两遍
-      const sourceName = (id) => ({ native: "B站官方字幕", whisper: "Whisper 语音转字幕", local: "SenseVoice 语音转字幕" })[id] || id;
+      // ytdlp 那个下载器不是引擎，它取的是别的站自己带的字幕，名字照这个说
+      const sourceName = (id) => ({ native: "B站官方字幕", whisper: "Whisper 语音转字幕", local: "SenseVoice 语音转字幕", ytdlp: "站上现成字幕" })[id] || id;
 
       // 下一步该做什么：没登录就先登录，登录了再看 Whisper 那套装没装好。做到的卡片高亮，用户从上往下点不会点错。
       const nextStep = !login ? "" : !login.loggedIn ? "login" : !asrReady ? "asr" : "done";
@@ -360,7 +407,7 @@ window.__ModuleLoader__.load({
         "div",
         { className: "vsub-root" },
         h("div", null, h("h2", { style: { margin: "0 0 4px", fontSize: 17 } }, props.title || "视频字幕"),
-          h("p", { className: "vsub-muted" }, props.subtitle || "取 B站 视频字幕：B站官方字幕要登录，登录一次就好。")),
+          h("p", { className: "vsub-muted" }, props.subtitle || "取视频字幕：B站 要登录一次，别的站要先装一次下载器。")),
 
         error ? h("p", { className: "vsub-muted", style: { color: "#dc2626" } }, error) : null,
         expiredBar,
@@ -452,7 +499,36 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
-        // 4. 来源健康状况
+        // 4. B站 以外的站要用的那个现成下载器（YouTube 这类站靠它取字幕和声音）
+        h(
+          "div",
+          { className: "vsub-card" },
+          h(
+            "div",
+            { className: "vsub-row" },
+            h("h3", null, "B站 以外的站用的下载器"),
+            h("span", { className: "vsub-badge " + (ytdlpReady ? "ok" : "bad") }, ytdlpReady ? "装好了" : "还缺东西"),
+            h("span", { style: { flex: 1 } }),
+            ytdlpRunning
+              ? h("button", { className: "vsub-btn", onClick: cancelYtdlpSetup }, "取消安装")
+              : h("button", { className: "vsub-btn " + (ytdlpReady ? "" : "primary"), onClick: startYtdlpSetup, disabled: busy === "ytdlp" }, ytdlpReady ? "重新检查" : "一键安装"),
+          ),
+          h("p", { className: "vsub-muted" },
+            ytdlpReady
+              ? "B站 以外的视频站靠这个小程序去取字幕和声音。装好之后，把别的站的视频链接发进来就能用，取字幕的方式和 B站 一样。"
+              : "YouTube 这类 B站 以外的视频站，要装一个小程序才能取字幕和声音，大约十几兆，点上面的一键安装就行。不装也不影响 B站 那些视频。"),
+          ytdlpSteps.length
+            ? h("ul", { className: "vsub-muted", style: { margin: "4px 0 0", paddingLeft: 20 } },
+                ytdlpSteps.map((s) => h("li", { key: s.id },
+                  (s.state === "done" ? "✔ " : s.state === "running" ? "… " : s.state === "failed" ? "✘ " : s.state === "skipped" ? "✔ " : "· ") +
+                  s.label + (s.detail ? "：" + s.detail : "") + (s.bytesTotal ? "（" + s.percent + "%）" : ""))))
+            : null,
+          ytdlpJob && ytdlpJob.log && ytdlpJob.log.length
+            ? h("div", { className: "vsub-log" }, ytdlpJob.log.slice(-40).join("\n"))
+            : null,
+        ),
+
+        // 5. 来源健康状况
         h(
           "div",
           { className: "vsub-card" },
@@ -465,7 +541,7 @@ window.__ModuleLoader__.load({
               (p.placeholder || p.note || "可用")))),
         ),
 
-        // 5. 常用设置
+        // 6. 常用设置
         h(
           "div",
           { className: "vsub-card" },

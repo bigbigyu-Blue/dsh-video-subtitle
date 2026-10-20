@@ -19,6 +19,7 @@ import {
 import { toSvg } from "./qr.js";
 import { asrPaths, asrStatus, startSetup, setupState, cancelSetup, installHint } from "./asr-env.js";
 import { localStatus, localSetupState, startLocalSetup, cancelLocalSetup } from "./local-env.js";
+import { ytdlpStatus, ytdlpSetupState, startYtdlpSetup, cancelYtdlpSetup } from "./ytdlp-env.js";
 import { describeSettings, saveSettings, effectiveConfig, settingsFile } from "./settings.js";
 import { providersStatus, defaultSaveDir } from "./pipeline.js";
 
@@ -156,6 +157,13 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
     } catch (e) {
       local = { ready: false, items: [], missing: [], error: String(e?.message ?? e) };
     }
+    // B站 以外的站要靠那个现成的下载器，同样是同步体检，出错也照样把它报出去
+    let ytdlp;
+    try {
+      ytdlp = ytdlpStatus(cfg);
+    } catch (e) {
+      ytdlp = { ready: false, detail: String(e?.message ?? e) };
+    }
     const providers = providersStatus(cfg).map((p) => ({
       provider: p.provider,
       wired: p.wired,
@@ -170,6 +178,7 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
       login,
       asr,
       local,
+      ytdlp,
       providers,
       settings: describeSettings(cfg),
       dirs: { defaultSaveDir: defaultSaveDir(), loginFile: loginFile(), settingsFile: settingsFile() },
@@ -280,6 +289,33 @@ export function registerApiRoutes(ctx, { getCfg, version = "", request } = {}) {
   add("POST", `${PREFIX}/local/cancel`, async (req, res) => {
     try {
       sendJson(res, 200, { ok: true, ...cancelLocalSetup() });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `取消安装失败：${e?.message ?? e}` });
+    }
+  });
+
+  // B站 以外的站：装那个现成的下载器，写法跟本机识别那三条一样
+  add("POST", `${PREFIX}/ytdlp/setup`, async (req, res) => {
+    const cfg = config();
+    try {
+      const r = await startYtdlpSetup(cfg, {});
+      sendJson(res, 200, { ok: true, started: r.started, taskId: r.taskId });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `开始安装失败：${e?.message ?? e}` });
+    }
+  });
+
+  add("GET", `${PREFIX}/ytdlp/state`, async (req, res) => {
+    try {
+      sendJson(res, 200, { ok: true, ...ytdlpSetupState() });
+    } catch (e) {
+      sendJson(res, 200, { ok: false, error: `读安装进度失败：${e?.message ?? e}` });
+    }
+  });
+
+  add("POST", `${PREFIX}/ytdlp/cancel`, async (req, res) => {
+    try {
+      sendJson(res, 200, { ok: true, ...cancelYtdlpSetup() });
     } catch (e) {
       sendJson(res, 200, { ok: false, error: `取消安装失败：${e?.message ?? e}` });
     }

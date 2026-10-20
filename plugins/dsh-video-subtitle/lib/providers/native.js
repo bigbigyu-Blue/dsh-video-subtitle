@@ -43,6 +43,10 @@ function toTracks(list) {
 }
 
 export async function fetchSubtitles({ meta, ctx }) {
+  // B站 官方接口只认 B站 的视频编号，别的站一步都不多做，标一笔就走
+  if (meta?.platform && meta.platform !== "bilibili") {
+    throw ctx.error(id, "UNSUPPORTED", "不是 B站 的视频，这条来源不适用");
+  }
   const headers = { Referer: REFERER };
   const cred = loadCredential(ctx.cfg ?? {});
   const cookie = cred.cookie;

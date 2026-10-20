@@ -54,7 +54,7 @@ const inject = ["tools", "systemPrompt"];
 /** Deployment-tunable config, filled by the loader from the patch row. */
 const Config = z.object({
   enabled: z.boolean().default(true),
-  providerOrder: z.array(z.string()).default(["native", "whisper", "local"]),
+  providerOrder: z.array(z.string()).default(["native", "ytdlp", "whisper", "local"]),
   saveDir: z.string().default(""),
   saveToWorkspace: z.boolean().default(true),
   workspaceSubdir: z.string().default(".subtitles"),
@@ -91,10 +91,13 @@ const Config = z.object({
   biliCredentialFile: z.string().default(""),
   // 批量取字幕单次最多跑几条（合集分P很多时防止一次跑太久），被截掉的条数会如实报出来
   batchMaxItems: z.number().default(20),
+  // 借来的下载器（B站 以外的站用它取字幕与声音）：留空 = 用设置页一键安装装到插件目录里那份
+  ytdlpPath: z.string().default(""),
 });
 
 const SYSTEM_PROMPT = [
-  "Use the video subtitle tools for Bilibili videos (bare BV id, bare av id, bilibili.com/video/BV... or /av..., b23.tv short link, ?p= 分P).",
+  "Use the video subtitle tools for Bilibili videos (bare BV id, bare av id, bilibili.com/video/BV... or /av..., b23.tv short link, ?p= 分P) and for any other video site whose link the bundled downloader knows (YouTube and about a thousand others; pass the full watch URL).",
+  "【别的站】B站 以外的站走借来的下载器：先取站上现成的字幕（人工优先，其次站上自动生成的），站上真没有才把声音取下来交给本机转写。整张播放列表、整个频道不展开，一次只处理给的那一条，要说明只取了这一条。要登录才给看的站如实说清，不替用户登录。",
   "【取字幕】subtitle_fetch(url)：把字幕写入本地 .srt 文件，只回元数据（标题、时长、字数、路径）。正文不会进入上下文。",
   "【落盘位置】默认写进发起这次调用的那个会话自己的工作区，子目录 workspaceSubdir（默认 .subtitles）；取不到会话工作区才退回 <DSH_HOME>/subtitles。传 dir 参数可指定别处。",
   "【读正文】subtitle_read(path, from, to, max_chars)：按时间区间分段读。20 分钟视频约 2.5 万字，禁止一次整篇读。",
@@ -102,7 +105,8 @@ const SYSTEM_PROMPT = [
   "【排障】subtitle_providers 报告各 provider 的接线状态与最近一次结果（哪个源缺什么、上次为什么失败，在这里一眼可见）。",
   "【批量】subtitle_batch(urls, parts, lang, dir, force, max_items)：一次取多条。urls 给数组或一整段粘贴的文本（换行/逗号分隔都行）；parts=true 时先把合集的分P全部展开再逐个取，适合多集课程/连续剧。某一条失败不影响其它条，每条都有独立结果；条数超上限时如实告诉你还剩几条没取。",
   "【整理】subtitle_polish(path, dir, max_gap, max_chars)：把取回来的 .srt 拼回通顺句子并补标点，另写一份纯文稿 .txt。只做拼接和插入标点，一个原字都不改、不译、不删。B站 官方 AI 字幕是逐句短碎片、完全没有标点，要给人读或做总结就先用它整理一遍。",
-  "provider 顺序默认 native→whisper→local，在 profile 的 cordis.patch.yml 里可改。",
+  "provider 顺序默认 native→ytdlp→whisper→local，在 profile 的 cordis.patch.yml 里可改。",
+  "ytdlp 是「站上现成字幕」：B站 上它自己跳过（B站 走官方接口更快更全），别的站先问站上有没有现成字幕轨，人工优先、站上自动生成的其次，要的语种没有就取视频原文语种那条。下载器没装时它报 DOWNLOADER_MISSING，这时让用户到「设置 → 视频字幕」页的「B站 以外的站用的下载器」卡片点一键安装，不要说视频没有字幕。",
   "native 是主力源：B站 官方 AI 字幕轨要「已登录 + WBI 签名」才会返回地址，匿名拿不到。插件自动读本机已有登录凭据（biliCredentialFile 或 biliCookie），通常在 1 秒内返回。拿不到时先看 subtitle_providers 里 native 那行写的凭据状态，不要去猜视频没有字幕。",
   "whisper 是用 Whisper 引擎在本机转字幕，任何有声音的视频都能转但慢（约每分钟音频 8 秒），没有次数限制；它转的是整段音频，结果标记为完整。",
   "local 是用 SenseVoice 引擎在本机转字幕，和 whisper 是两个不同的引擎，通常比 whisper 快一倍左右、覆盖更全，但断句更碎、个别视频会漏句。它需要三样零件（FFmpeg、SenseVoice 模型、模型词表，共约 260MB），在设置里的「视频字幕」页点一键安装就能装齐，不需要 Python。装好前它在 subtitle_providers 里会显示为可选、缺件；缺件时如实告诉用户去设置页装，不要因此说视频没有字幕。",
@@ -131,10 +135,14 @@ const DIR_SOURCE_NOTE = {
 function fmtFetch(v) {
   if (!v) return "subtitle_fetch 没有返回结果";
   const lines = [];
+  // 视频编号那一栏：B站 写 BVID，别的站写站上那个视频自己的编号，再看不出就写网址主机
+  const idLine = v.platform === "bilibili"
+    ? `BVID ${v.bvid}${v.page > 1 ? ` P${v.page}` : ""}`
+    : `${v.site ? `${v.site} ` : ""}编号 ${v.videoId ?? "?"}`;
   if (v.ok) {
     lines.push(`${v.cached ? "命中缓存" : "已取到字幕"}：${v.title}`);
     lines.push(
-      `BVID ${v.bvid}${v.page > 1 ? ` P${v.page}` : ""} | 时长 ${clock(v.durationS)} | 来源 ${v.source} | 耗时 ${v.elapsedMs}ms`,
+      `${idLine} | 时长 ${clock(v.durationS)} | 来源 ${v.source} | 耗时 ${v.elapsedMs}ms`,
     );
     if (v.dir) lines.push(`落盘目录：${v.dir}${DIR_SOURCE_NOTE[v.dirSource] ?? ""}`);
     for (const t of v.tracks ?? []) {
@@ -144,8 +152,9 @@ function fmtFetch(v) {
     lines.push("正文未进入上下文。需要内容时用 subtitle_read(path, from, to) 按区间读。");
     if (v.metaPath) lines.push(`元数据：${v.metaPath}`);
   } else {
-    lines.push(`取字幕失败：${v.title ?? v.bvid}`);
-    lines.push(`BVID ${v.bvid}${v.page > 1 ? ` P${v.page}` : ""} | 目录 ${v.dir}`);
+    // 别的站 bvid 是空串，用 ?? 会停在空串上，整行就空了，所以这里用 ||
+    lines.push(`取字幕失败：${v.title || v.bvid || v.videoId || v.site || ""}`);
+    lines.push(`${idLine} | 目录 ${v.dir}`);
     if (v.partial) {
       lines.push(`文稿不完整：只覆盖 ${v.coveragePct ?? "?"}%，未达可用线。**已丢弃、没有写文件。不能作为谈论视频内容的依据。**`);
     }
@@ -187,8 +196,9 @@ function fmtBatch(v) {
   if (v.truncated > 0) lines.push(`还有 ${v.truncated} 条没取（单次上限），要取完请再调一次并只传剩下的链接。`);
   lines.push("");
   for (const it of v.items ?? []) {
-    const tag = it.page ? ` P${it.page}` : "";
-    const head = it.bvid ? `${it.bvid}${tag}` : String(it.url ?? "?").slice(0, 60);
+    const tag = it.page && it.page > 1 ? ` P${it.page}` : "";
+    // 别的站没有 BVID：有站上编号就写编号，没有就写网址，别让整行空着
+    const head = it.bvid ? `${it.bvid}${tag}` : it.videoId ? `${it.videoId}${tag}` : String(it.url ?? "?").slice(0, 60);
     if (it.ok) {
       const cov = it.coveragePct == null ? "" : ` · 覆盖 ${it.coveragePct}%`;
       lines.push(`✔ ${head}「${it.title || "无标题"}」${it.cached ? " · 命中已有文件" : ` · 来源 ${it.source ?? "?"}`} · ${it.chars} 字 / ${it.blocks} 段${cov}`);
@@ -272,7 +282,7 @@ function apply(ctx, config) {
         url: {
           type: "string",
           required: true,
-          description: "Bilibili video URL (bilibili.com/video/BV... or /av..., b23.tv) or a bare BV/av id; ?p= selects a 分P",
+          description: "Video URL. Bilibili: bilibili.com/video/BV... or /av..., b23.tv, or a bare BV/av id (?p= selects a 分P). Other sites: the full watch URL (YouTube and any site the bundled downloader knows); one video at a time, playlists and channels are not expanded",
         },
         lang: { type: "string", description: "Preferred subtitle language, e.g. zh or en (default: config preferLang)" },
         dir: { type: "string", description: "Output directory for the .srt file (default: config saveDir, else the calling session's workspace subdir, else <DSH_HOME>/subtitles)" },

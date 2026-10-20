@@ -43,8 +43,23 @@ test("设置页会把该先做的那张卡片挑出来高亮", () => {
 test("可选的字幕来源在状态里带标记，界面才敢把它画成灰的", () => {
   const pipeline = readFileSync(join(root, "lib/pipeline.js"), "utf8");
   const api = readFileSync(join(root, "lib/api.js"), "utf8");
-  assert.match(pipeline, /optional:\s*pid === "local"/);
+  // 可选的两条：本机识别、别的站用的下载器。不装它们不影响 B站 那条路，界面上不该显示成故障
+  assert.match(pipeline, /optional:\s*pid === "local" \|\| pid === "ytdlp"/);
   assert.match(api, /optional:\s*p\.optional === true/);
+});
+
+test("设置页里有「B站 以外的站用的下载器」那张卡片，三条接口都接上了", () => {
+  const client = readFileSync(join(root, pkg.exports["./client"]), "utf8");
+  const api = readFileSync(join(root, "lib/api.js"), "utf8");
+  assert.match(client, /B站 以外的站用的下载器/, "卡片标题要能让人一眼看懂是干什么的");
+  assert.match(client, /\/ytdlp\/setup/, "卡片上的按钮要真能发起安装");
+  assert.match(client, /\/ytdlp\/state/, "要能看安装进度");
+  assert.match(client, /\/ytdlp\/cancel/, "要能取消安装");
+  for (const path of ["ytdlp/setup", "ytdlp/state", "ytdlp/cancel"]) {
+    assert.ok(api.includes(path), "接口里缺 " + path);
+  }
+  // 界面上的话不许出现英文缩写与行话
+  assert.match(client, /ytdlp: "站上现成字幕"/);
 });
 
 test("默认配置文件的路径真的存在", () => {

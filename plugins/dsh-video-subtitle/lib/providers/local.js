@@ -18,14 +18,14 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { promises as fs, existsSync, readdirSync } from "node:fs";
-import { createWriteStream } from "node:fs";
-import { Readable } from "node:stream";
 import path from "node:path";
 import os from "node:os";
 import { msToTimestamp, detectScriptLang } from "../srt.js";
 import { localEnvPaths } from "../local-env.js";
+import { fetchAudio } from "../audio.js";
 
 export const id = "local";
+// 只有 probeLanguage（判断视频原文语种）还用官方接口，取声音已挪到 lib/audio.js
 const API = "https://api.bilibili.com";
 const require = createRequire(import.meta.url);
 const DSH_HOME = process.env.DSH_HOME || path.join(os.homedir(), ".dsh");
@@ -327,33 +327,19 @@ export async function fetchSubtitles({ meta, ctx }) {
     throw ctx.error(id, "UNSUPPORTED", `视频 ${(meta.durationS / 60).toFixed(0)} 分钟，超过本地转写上限 ${maxMin} 分钟`);
   }
 
-  const headers = { Referer: "https://www.bilibili.com/" };
-  const pu = await ctx.request(
-    `${API}/x/player/playurl?bvid=${meta.bvid}&cid=${meta.cid}&fnval=16&qn=64&fourk=1`,
-    { headers, signal: ctx.signal },
-  );
-  const audioUrl = pu?.data?.dash?.audio?.[0]?.baseUrl ?? pu?.data?.dash?.audio?.[0]?.base_url;
-  if (!audioUrl) throw ctx.error(id, "AUDIO_UNAVAILABLE", "dash.audio[0] 缺失");
-  let host = "";
-  try {
-    host = new URL(audioUrl).host;
-  } catch {
-    /* ignore */
-  }
-
   const tmp = await makeTmpDir(ctx.cfg);
-  const m4s = path.join(tmp, "a.m4s");
+  let audio;
+  try {
+    // 声音从哪来按平台分岔：B站 走官方接口，别的站交给下载器，解码与识别两边完全一样
+    audio = await fetchAudio({ meta, ctx, tmp, provider: id });
+  } catch (e) {
+    fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+    throw e;
+  }
+  const m4s = audio.path;
+  const host = audio.host;
   const wav = path.join(tmp, "a.wav");
   try {
-    const res = await ctx.fetchRaw(audioUrl, { headers, signal: ctx.signal });
-    if (!res.ok) throw ctx.error(id, "AUDIO_UNAVAILABLE", `音频下载 HTTP ${res.status}（主机 ${host}）`);
-    await new Promise((resolve, reject) => {
-      const ws = createWriteStream(m4s);
-      Readable.fromWeb(res.body).pipe(ws);
-      ws.on("finish", resolve);
-      ws.on("error", reject);
-    });
-
     const dec = await runProcess(p.ffmpeg, ["-y", "-hide_banner", "-loglevel", "error", "-i", m4s, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], {
       timeoutMs: 15 * 60 * 1000,
       signal: ctx.signal,

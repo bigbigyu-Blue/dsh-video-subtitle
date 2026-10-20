@@ -1,18 +1,27 @@
 /**
  * Video-id parsing and Bilibili metadata resolution.
- * bilibili（BV / av / b23.tv 短链 / ?p= 分P）+ youtube 识别（尚未接 provider）。
+ * bilibili（BV / av / b23.tv 短链 / ?p= 分P）+ 别的站（YouTube 各种写法，其余站原样留网址）。
+ *
+ * 别的站不在这里解析视频编号：那些站的解析规则全交给下载器，这里只负责「这是不是一个网址、
+ * 是不是 B站」。认不出站点的网址也照样放行，让下载器去判断，报错才如实。
  */
 
 const BV_RE = /\bBV[0-9A-Za-z]{10}\b/;
 const AV_RE = /\bav(\d{1,12})\b/i;
 const YT_WATCH_RE = /(?:youtube\.com\/watch\?[^#\s]*\bv=)([A-Za-z0-9_-]{6,})/;
 const YT_SHORT_RE = /youtu\.be\/([A-Za-z0-9_-]{6,})/;
+// 手机分享出来的几种写法：/shorts/、/live/、/embed/
+const YT_PATH_RE = /youtube(?:-nocookie)?\.com\/(?:shorts|live|embed|v)\/([A-Za-z0-9_-]{6,})/;
 const PAGE_RE = /[?&]p=(\d+)/;
 
 const BILI_HOST_RE = /(^|\.)(bilibili\.com|b23\.tv|bilibili\.tv)/i;
-const YT_HOST_RE = /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)/i;
+const YT_HOST_RE = /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com|m\.youtube\.com)/i;
 
-/** @returns {{platform:'bilibili'|'youtube', raw:string, bvid?:string, aid?:number, videoId?:string, page?:number, short?:boolean}} */
+/**
+ * 解析结果。platform 只有三种：bilibili、youtube、other（别的站）。
+ * 别的站只留 raw 网址与 host，视频标题、时长、原文语种由下载器问出来。
+ * @returns {{platform:'bilibili'|'youtube'|'other', raw:string, host?:string, bvid?:string, aid?:number, videoId?:string, page?:number, short?:boolean}}
+ */
 export function parseVideoInput(input) {
   const raw = String(input ?? "").trim();
   if (!raw) throw new Error("empty video input");
@@ -36,11 +45,14 @@ export function parseVideoInput(input) {
     return { platform: "bilibili", raw, page };
   }
   if (YT_HOST_RE.test(host)) {
-    const m = raw.match(YT_WATCH_RE) ?? raw.match(YT_SHORT_RE);
+    const m = raw.match(YT_WATCH_RE) ?? raw.match(YT_SHORT_RE) ?? raw.match(YT_PATH_RE) ?? null;
+    // 播放列表链接（/playlist?list=...）不展开：用户定过一次只处理给的那一条
+    if (!m && /[?&]list=/.test(raw)) throw new Error("这是整个播放列表的链接，一次只取一条视频。请在列表里打开要看的那一条，复制那条视频自己的网址");
     if (!m) throw new Error(`无法从 YouTube 链接解析视频 ID: ${raw}`);
-    return { platform: "youtube", raw, videoId: m[1] };
+    return { platform: "youtube", raw, host, videoId: m[1] };
   }
-  throw new Error(`无法识别的视频链接（支持 B站 BV 号 / av 号 / b23.tv 短链）: ${raw}`);
+  if (host) return { platform: "other", raw, host };
+  throw new Error(`无法识别的视频链接（要 B站 的 BV 号 / av 号 / b23.tv 短链，或者一条完整的视频网址）: ${raw}`);
 }
 
 /** Follow a b23.tv short link to the final URL, then re-parse it. */

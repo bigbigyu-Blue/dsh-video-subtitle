@@ -36,6 +36,21 @@ test("残片被门槛拦下时说清了这不是完整内容", () => {
   assert.ok(hints.some((h) => /完整度门槛/.test(h) && /残片/.test(h)), hints.join(" / "));
 });
 
+test("别的站没装下载器时，第一句就让人去装下载器", () => {
+  const hints = failureHints([T("ytdlp", "DOWNLOADER_MISSING", "还没装下载器")], {});
+  assert.match(hints[0], /下载器/);
+  assert.match(hints[0], /一键安装/);
+  assert.match(hints[0], /设置/);
+});
+
+test("网址不认识或要登录时，说清是哪一种、不替你登录", () => {
+  const hints = failureHints([T("ytdlp", "UNSUPPORTED_SITE", "这个站要登录才给看")], {});
+  assert.ok(hints.some((h) => /不认识/.test(h) || /要登录/.test(h)), hints.join(" / "));
+  assert.ok(hints.some((h) => /不替你登录/.test(h)), hints.join(" / "));
+  // 不许把「要登录」说成「视频没有字幕」
+  assert.ok(!hints.some((h) => /没有字幕/.test(h)), hints.join(" / "));
+});
+
 test("什么线索都没有时也给一句能照着做的话，不返回空", () => {
   const hints = failureHints([], {});
   assert.equal(hints.length, 1);

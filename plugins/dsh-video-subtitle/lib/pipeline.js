@@ -14,6 +14,8 @@ import { readSlice, srtStats, langSlug, langMatches, detectScriptLang, timelineI
 import * as nativeProvider from "./providers/native.js";
 import * as localProvider from "./providers/local.js";
 import * as whisperProvider from "./providers/whisper.js";
+import * as ytdlpProvider from "./providers/ytdlp.js";
+import { probe as probeOtherSite } from "./ytdlp.js";
 import { probeLanguage } from "./providers/local.js";
 import { polishSrt } from "./text-format.js";
 
@@ -22,6 +24,7 @@ const UA =
 
 export const PROVIDERS = {
   native: nativeProvider,
+  ytdlp: ytdlpProvider,
   whisper: whisperProvider,
   local: localProvider,
 };
@@ -266,9 +269,10 @@ function inflightKey({ url, lang, dir, force = false, cfg = {} }) {
   let id;
   try {
     const p = parseVideoInput(url);
-    id = p.short
-      ? `short:${String(url).trim().toLowerCase()}`
-      : `${p.platform}:${p.bvid ?? p.aid ?? p.videoId ?? ""}:${p.page ?? 1}`;
+    // 别的站拿不到站上的视频编号（那要问下载器），就用网址本身当键，免得两条不同的视频被当成同一条
+    id = p.short || (!p.bvid && !p.aid && !p.videoId)
+      ? `raw:${String(url).trim().toLowerCase()}`
+      : `${p.platform}:${p.bvid ?? p.aid ?? p.videoId}:${p.page ?? 1}`;
   } catch {
     id = `raw:${String(url).trim().toLowerCase()}`;
   }
@@ -321,8 +325,15 @@ export function failureHints(attempts, cfg = {}) {
     add("网络或视频权限出了岔子。过一会儿再取一次；再失败就是这条视频这边拿不到音频。");
   }
 
+  // 别的站这条路没走通时先说清是哪一种，别让人误以为「视频没有字幕」
+  if (hit("ytdlp", "DOWNLOADER_MISSING")) {
+    add("别的站的视频要靠下载器才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「一键安装」，装完再取一次。");
+  } else if (has("UNSUPPORTED_SITE")) {
+    add("这个网址下载器不认识，或者这个站要登录才给看。换一条公开视频的完整网址试试；要登录的站这里不替你登录。");
+  }
+
   if (!out.length) {
-    add("这条视频两个来源都没有给出可用字幕。换一条有字幕的视频试试；每条都失败时，到「设置 → 视频字幕」看一眼来源状态里缺什么。");
+    add("这条视频几个来源都没有给出可用字幕。换一条有字幕的视频试试；每条都失败时，到「设置 → 视频字幕」看一眼来源状态里缺什么。");
   }
   return out;
 }
@@ -355,17 +366,71 @@ export function fetchTimeoutBudget(cfg = {}) {
   return 30000 + per * count + whisperMs + 15000; // 取视频信息 30s + 每个源各一份 + whisper 单独一份 + 落盘余量 15s
 }
 
+/**
+ * 别的站的视频信息：标题、时长、原文语种都由下载器问出来。
+ *
+ * 问不到时如实失败，不编一个标题顶上；下载器没装时也不在这里报错，
+ * 让来源链自己去说「还没装下载器」，这样用户拿到的是一句能动手的话。
+ */
+async function resolveOtherSiteMeta(parsed, ctx) {
+  const ready = ytdlpProvider.availability(ctx.cfg)?.ready === true;
+  if (!ready) {
+    return {
+      bvid: "",
+      videoId: siteIdFromUrl(parsed.raw),
+      page: 1,
+      title: parsed.raw,
+      desc: "",
+      durationS: undefined,
+      language: "",
+      site: parsed.host ?? "",
+    };
+  }
+  let info;
+  try {
+    info = await probeOtherSite({ url: parsed.raw, cfg: ctx.cfg, signal: ctx.signal });
+  } catch (e) {
+    const err = ctx.error("ytdlp", e?.code ?? "NETWORK", e?.detail ?? e?.message ?? String(e));
+    err.metaUnavailable = true;
+    throw err;
+  }
+  return {
+    bvid: "",
+    videoId: String(info?.id ?? siteIdFromUrl(parsed.raw)),
+    page: 1,
+    title: String(info?.title ?? parsed.raw),
+    desc: "",
+    // probe 交出来的字段叫 durationS（下载器原话是 duration，那边已经换过一次名字）
+    durationS: Number(info?.durationS ?? info?.duration) > 0 ? Number(info?.durationS ?? info?.duration) : undefined,
+    language: String(info?.language ?? ""),
+    site: parsed.host ?? "",
+    extractor: String(info?.extractor ?? ""),
+    // 清单已经问过一次了，来源链里那条「站上现成字幕」直接拿去用，不重复问第二遍
+    siteProbe: info,
+  };
+}
+
+/** 下载器没装时拿不到站上的视频编号：用网址本身算一个稳定的短编号，缓存与文件名照样认得上。 */
+function siteIdFromUrl(raw) {
+  const text = String(raw ?? "");
+  let digest = 0;
+  for (let i = 0; i < text.length; i += 1) digest = (digest * 31 + text.charCodeAt(i)) % 0xffffffff;
+  return `site-${digest.toString(36)}`;
+}
+
 async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, signal, log = () => {}, workspaceRoot = "" }) {
   const startedAt = Date.now();
   const parsed0 = parseVideoInput(url);
   const parsed = parsed0.short ? await resolveShortLink(parsed0, { signal }) : parsed0;
-  if (parsed.platform !== "bilibili") {
-    throw new Error(`目前只支持 bilibili；收到平台 ${parsed.platform}`);
-  }
 
   const ctx = makeCtx(cfg, signal, log);
-  const meta = await resolveBilibiliMeta(parsed, { signal, request: (u, o) => ctx.request(u, o) });
+  // B站 问官方接口拿标题与时长；别的站交给下载器问，问不到就照实失败，不编一个标题顶上
+  const meta =
+    parsed.platform === "bilibili"
+      ? await resolveBilibiliMeta(parsed, { signal, request: (u, o) => ctx.request(u, o) })
+      : await resolveOtherSiteMeta(parsed, ctx);
   meta.raw = parsed.raw;
+  meta.platform = parsed.platform;
 
   // 落盘顺序：显式 dir 参数 → 配置 saveDir → 当前会话工作区\<workspaceSubdir> → 旧的 DSH_HOME 兜底
   const wsDir = cfg.saveToWorkspace === false ? "" : workspaceSaveDir(workspaceRoot, cfg.workspaceSubdir);
@@ -378,11 +443,15 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
         : defaultSaveDir();
   const dirSource = dir ? "arg" : cfg.saveDir ? "config" : wsDir ? "workspace" : "fallback";
   await fs.mkdir(outDir, { recursive: true });
-  const base = meta.page > 1 ? `${meta.bvid}-p${meta.page}` : meta.bvid;
+  // 文件名的前缀：B站 用 bvid，别的站用站上那个视频自己的编号，命名规则不分平台
+  const idText = meta.platform === "bilibili" ? meta.bvid : meta.videoId;
+  const base = meta.page > 1 ? `${idText}-p${meta.page}` : idText;
 
   const head = {
-    platform: "bilibili",
+    platform: meta.platform,
     bvid: meta.bvid,
+    videoId: meta.videoId,
+    site: meta.site ?? "",
     page: meta.page,
     title: meta.title,
     durationS: meta.durationS,
@@ -532,15 +601,24 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
         }
       }
       const fromAudio = Boolean(audioLang && slugs.includes(audioLang));
-      const wanted = fromAudio ? audioLang : fromMeta ? detected : (cfg.preferLang ?? []).find((l) => slugs.includes(l));
+      // 下载器报的原文语种也算一条线索：别的站的文字轨标签未必与它一致
+      const siteLang = meta.language ? langSlug(meta.language) : "";
+      const fromSite = Boolean(siteLang && slugs.includes(siteLang));
+      const wanted = fromAudio
+        ? audioLang
+        : fromMeta
+          ? detected
+          : fromSite
+            ? siteLang
+            : (cfg.preferLang ?? []).find((l) => slugs.includes(l));
       chosen = wanted ? slugs.indexOf(wanted) : 0;
       const others = slugs.filter((s, i) => i !== chosen);
       const othersNote = others.length ? `（另有 ${others.join("/")} 已丢弃）` : "";
       const moreNote = others.length ? `；另有 ${others.join("/")} 未保留` : "";
       const audioNote = audioLang && !fromAudio ? `；音频探测到 ${audioLang} 但该轨不存在` : "";
-      if (fromAudio || fromMeta) {
+      if (fromAudio || fromMeta || fromSite) {
         // 确实确认了原声语种，才写「判断原文语种为 X」
-        const by = fromAudio ? `音频语种探测（${audioLang}）` : `标题/简介（${detected}）`;
+        const by = fromAudio ? `音频语种探测（${audioLang}）` : fromMeta ? `标题/简介（${detected}）` : `视频自己的语种（${siteLang}）`;
         langNote = `按${by}判断原文语种为 ${slugs[chosen]}，只保留该轨${othersNote}${audioNote}`;
       } else {
         // 确认不了原声语种：照常保留一条，但必须写明这是翻译，不得声称判断出了原文语种
@@ -630,20 +708,22 @@ export function providersStatus(cfg = {}) {
     let placeholder = null;
     let missing = null;
     let note = null;
-    const checker = pid === "local" ? localProvider : pid === "whisper" ? whisperProvider : pid === "native" ? nativeProvider : null;
+    const checker = p;
     if (checker && typeof checker.availability === "function") {
       try {
         const av = checker.availability(cfg);
         if (av.ready) {
           // native 就绪时把「凭据从哪来」写出来：拿不到官方 AI 字幕时，第一条要查的就是凭据还在不在。
-          // availability 的 detail 只说明凭据来源（和登录名），不含任何凭据值。
-          if (pid === "native") note = av.detail;
+          // availability 的 detail 只说明凭据来源（和登录名），不含任何凭据值；下载器那句写的是装没装、版本多少。
+          if (pid === "native" || pid === "ytdlp") note = av.detail;
         } else {
           missing = av.missing;
-          // local 是可选的第四条路：官方字幕加本机转写已经够用，它缺件不算故障，别让它红着吓人。
+          // local 与 ytdlp 都是可选的路：只在用得到它们时才需要装，缺件不算故障，别让它红着吓人。
           placeholder = pid === "local"
             ? `还没装好（缺 ${av.missing.join("、")}），这条可选，不装也能用别的来源`
-            : `还没装好：缺 ${av.missing.join("、")}`;
+            : pid === "ytdlp"
+              ? `还没装好（缺 ${av.missing.join("、")}），B站 的视频不受影响，别的站要装了才能用`
+              : `还没装好：缺 ${av.missing.join("、")}`;
         }
       } catch (e) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;
@@ -652,7 +732,7 @@ export function providersStatus(cfg = {}) {
     return {
       provider: pid,
       wired: typeof p.fetchSubtitles === "function",
-      optional: pid === "local",
+      optional: pid === "local" || pid === "ytdlp",
       placeholder,
       missing,
       note,

@@ -88,8 +88,8 @@ export async function expandTargets(inputs, { request, signal, parts = false } =
     }
 
     if (parsed.platform !== "bilibili") {
-      // 别的站（youtube 等）目前接不了，明确写清跳过原因，不假装取到了
-      out.push({ url: parsed.raw, skip: `目前只支持 bilibili，收到的是 ${parsed.platform} 链接` });
+      // 别的站只取给的那一条：下载器自己认站、自己报错，这里不展开、也不替它判断
+      out.push({ url: parsed.raw, bvid: null, videoId: parsed.videoId ?? null, page: 1, title: "" });
       continue;
     }
 
@@ -168,6 +168,23 @@ function failReason(res) {
     return tries.map((a) => `${a.provider ?? "?"}: ${a.result ?? "?"}${a.detail ? ` ${a.detail}` : ""}`).join("；");
   }
   return "所有字幕源都没有取到可用字幕";
+}
+
+/**
+ * 取视频信息这一步就失败时（下载器没装、网址不认识）也给一句下一步。
+ * 认得出来的错误码给具体动作，认不出来就不说，免得空话占地方。
+ */
+function failHintsFromError(e) {
+  const code = String(e?.code ?? e?.reason ?? "");
+  const detail = String(e?.detail ?? e?.message ?? "");
+  if (code === "DOWNLOADER_MISSING") {
+    return ["别的站的视频要靠下载器才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「一键安装」。"];
+  }
+  if (code === "UNSUPPORTED_SITE") {
+    return ["这个网址下载器不认识，或者这个站要登录才给看。换一条公开视频的完整网址试试；要登录的站这里不替你登录。"];
+  }
+  if (/播放列表/.test(detail)) return [detail];
+  return [];
 }
 
 /** 只保留汇报需要的轨字段，不要把整段字幕正文塞进批量结果里。 */
@@ -294,6 +311,7 @@ export async function batchFetch(args = {}) {
       items.push({
         url: target.url,
         bvid: target.bvid ?? null,
+        videoId: target.videoId ?? null,
         page: target.page ?? null,
         title: target.title ?? "",
         ok: false,
@@ -304,6 +322,8 @@ export async function batchFetch(args = {}) {
         blocks: 0,
         tracks: [],
         error: msgOf(e),
+        // 取视频信息这一步就失败时也要给「下一步」，否则整批里这条只剩一句原因
+        hints: failHintsFromError(e),
         elapsedMs: Date.now() - t0,
       });
       failedCount += 1;
@@ -322,6 +342,8 @@ export async function batchFetch(args = {}) {
     items.push({
       url: target.url,
       bvid: target.bvid ?? res?.bvid ?? null,
+      videoId: target.videoId ?? res?.videoId ?? null,
+      platform: res?.platform ?? null,
       page: target.page ?? res?.page ?? null,
       title: target.title || res?.title || "",
       ok,

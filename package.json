@@ -1,6 +1,6 @@
 {
   "name": "dsh-video-subtitle",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "DeepSeek Harness tool plugin: fetch video subtitles into local .srt files through a fallback provider chain — Bilibili's official subtitle API with login + WBI signature, a bundled yt-dlp downloader for every other video site the downloader knows (its own subtitles first, then local ASR on the downloaded audio), local faster-whisper ASR, local SenseVoice ASR. Batch fetch, 分P expansion, sentence reassembly into a plain transcript.",
   "type": "module",
   "main": "lib/index.js",
@@ -17,7 +17,8 @@
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "dsh-plugin.naming.json"
   ],
   "scripts": {
     "test": "node --test test/*.test.js"
@@ -43,13 +44,13 @@
     }
   },
   "engines": {
-    "dsh": ">=0.1.7-rc.1",
+    "dsh": "^0.2.1-rc.2",
     "node": ">=22"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-tools": "*",
-    "@deepseek-ai/schemastery": "*"
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {

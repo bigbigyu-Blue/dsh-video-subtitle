@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "policy": "dsh-plugin-naming/v1",
+  "plugin": {
+    "namespace": "bigbigyu",
+    "name": "video-subtitle",
+    "coordinate": "bigbigyu/video-subtitle",
+    "packageName": "dsh-video-subtitle"
+  },
+  "names": {
+    "pluginNames": [
+      "video-subtitle"
+    ],
+    "loaderIds": [
+      "videosub"
+    ],
+    "services": [],
+    "tools": [
+      "subtitle_fetch",
+      "subtitle_read",
+      "subtitle_batch",
+      "subtitle_polish",
+      "subtitle_providers"
+    ],
+    "commands": [],
+    "skills": [],
+    "skillProviders": [],
+    "events": [],
+    "settingsNamespaces": [
+      "dsh-video-subtitle"
+    ],
+    "routes": [
+      {
+        "kind": "prefix",
+        "path": "/api/video-subtitle"
+      }
+    ]
+  }
+}

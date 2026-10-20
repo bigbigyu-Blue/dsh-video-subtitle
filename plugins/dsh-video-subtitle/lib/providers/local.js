@@ -174,7 +174,7 @@ async function makeTmpDir(cfg) {
       lastErr = e;
     }
   }
-  throw new Error(`本机识别的临时目录都建不了（${cands.join("、")}）：${lastErr?.message ?? lastErr}`);
+  throw new Error(`SenseVoice 语音转字幕的临时目录都建不了（${cands.join("、")}）：${lastErr?.message ?? lastErr}`);
 }
 
 /**

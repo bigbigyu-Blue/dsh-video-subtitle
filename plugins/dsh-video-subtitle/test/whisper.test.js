@@ -101,12 +101,22 @@ test("所有临时目录都建不了时，报错里写清试过哪些地方", as
   const root = mkdtempSync(path.join(TMP_BASE, "bad-"));
   const blocker = path.join(root, "占位文件");
   writeFileSync(blocker, "");
+  // makeTmpDir 最后还会拿系统临时目录兜底。系统临时目录在有些机器上能写、有些不能写，
+  // 不把它也堵死，这条用例就会随机器状态时过时不过。把它指到一个普通文件下面，才测得到「全都建不了」。
+  const saved = { TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP };
+  process.env.TMPDIR = path.join(blocker, "丙");
+  process.env.TMP = path.join(blocker, "丙");
+  process.env.TEMP = path.join(blocker, "丙");
   try {
     await assert.rejects(
       () => makeTmpDir(path.join(blocker, "甲"), [path.join(blocker, "乙")]),
       (e) => /临时目录都建不了/.test(e.message) && /whisperTmpDir/.test(e.message),
     );
   } finally {
+    for (const key of Object.keys(saved)) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
     rmSync(root, { recursive: true, force: true });
   }
 });

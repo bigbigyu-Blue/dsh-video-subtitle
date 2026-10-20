@@ -151,12 +151,12 @@ export async function fetchSubtitles({ meta, ctx }) {
     throw ctx.error(id, "UNSUPPORTED", "B站 走官方接口，不经过下载器");
   }
 
-  // 2) 下载器没装：如实说清，告诉用户去哪装
+  // 2) 下载器没装：如实说清，名字写出来，告诉用户去哪装
   if (!ytdlpStatus(cfg).ready) {
     throw ctx.error(
       id,
       "DOWNLOADER_MISSING",
-      "还没装下载器：别的站要它才能取。到「设置 → 视频字幕」页点「一键安装」装一次就好。",
+      "还没装下载器 yt-dlp：别的站要它才能取。到「设置 → 视频字幕」页的「下载器 yt-dlp」那张卡片点「一键安装」装一次就好。",
     );
   }
 

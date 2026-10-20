@@ -178,7 +178,7 @@ function failHintsFromError(e) {
   const code = String(e?.code ?? e?.reason ?? "");
   const detail = String(e?.detail ?? e?.message ?? "");
   if (code === "DOWNLOADER_MISSING") {
-    return ["别的站的视频要靠下载器才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「一键安装」。"];
+    return ["别的站的视频要靠下载器 yt-dlp 才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「下载器 yt-dlp」那张卡片上点「一键安装」。"];
   }
   if (code === "UNSUPPORTED_SITE") {
     return ["这个网址下载器不认识，或者这个站要登录才给看。换一条公开视频的完整网址试试；要登录的站这里不替你登录。"];

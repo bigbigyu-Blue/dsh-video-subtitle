@@ -48,10 +48,12 @@ test("可选的字幕来源在状态里带标记，界面才敢把它画成灰�
   assert.match(api, /optional:\s*p\.optional === true/);
 });
 
-test("设置页里有「B站 以外的站用的下载器」那张卡片，三条接口都接上了", () => {
+test("设置页里有「下载器 yt-dlp」那张卡片，三条接口都接上了", () => {
   const client = readFileSync(join(root, pkg.exports["./client"]), "utf8");
   const api = readFileSync(join(root, "lib/api.js"), "utf8");
-  assert.match(client, /B站 以外的站用的下载器/, "卡片标题要能让人一眼看懂是干什么的");
+  // 卡片的原标题是「B站 以外的站用的下载器」，藏了名字；现在直接写 yt-dlp，
+  // 人一眼就知道装的是什么，要自己查也查得到
+  assert.match(client, /下载器 yt-dlp/, "卡片标题要写明装的是什么");
   assert.match(client, /\/ytdlp\/setup/, "卡片上的按钮要真能发起安装");
   assert.match(client, /\/ytdlp\/state/, "要能看安装进度");
   assert.match(client, /\/ytdlp\/cancel/, "要能取消安装");

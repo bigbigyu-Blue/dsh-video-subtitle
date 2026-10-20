@@ -331,8 +331,8 @@ export function failureHints(attempts, cfg = {}) {
     // 混成一句「还没装」会让已经装好的人以为装失败了
     add(
       isReady("ytdlp", cfg) === false
-        ? "别的站的视频要靠下载器才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「一键安装」，装完再取一次。"
-        : "下载器装是装了，这次没能启动（不是网址的问题）。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「重新检查」；还不行就点「一键安装」重装一次。",
+        ? "别的站的视频要靠下载器 yt-dlp 才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「下载器 yt-dlp」那张卡片上点「一键安装」，装完再取一次。"
+        : "下载器 yt-dlp 装是装了，这次没能启动（不是网址的问题）。打开「设置 → 视频字幕」，在「下载器 yt-dlp」那张卡片上点「重新检查」；还不行就点「一键安装」重装一次。",
     );
   } else if (has("UNSUPPORTED_SITE")) {
     add("这个网址下载器不认识，或者这个站要登录才给看。换一条公开视频的完整网址试试；要登录的站这里不替你登录。");
@@ -761,7 +761,7 @@ export function providersStatus(cfg = {}) {
         if (av.ready) {
           // native 就绪时把「凭据从哪来」写出来：拿不到官方 AI 字幕时，第一条要查的就是凭据还在不在。
           // availability 的 detail 只说明凭据来源（和登录名），不含任何凭据值；下载器那句写的是装没装、版本多少。
-          if (pid === "native" || pid === "ytdlp") note = av.detail;
+          if (pid === "native" || pid === "ytdlp") note = av.detail;  // ytdlp 的 detail 里带版本与名字
         } else {
           missing = av.missing;
           // local 与 ytdlp 都是可选的路：只在用得到它们时才需要装，缺件不算故障，别让它红着吓人。

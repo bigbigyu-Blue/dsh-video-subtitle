@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: "视频字幕",
       title: "视频字幕",
-      subtitle: "取视频字幕：B站 要登录一次，别的站要先装一次下载器。",
+      subtitle: "取视频字幕：B站 要登录一次，别的站要先装一次下载器 yt-dlp。",
     };
     const en = {
       nav: "Video subtitles",
@@ -407,7 +407,7 @@ window.__ModuleLoader__.load({
         "div",
         { className: "vsub-root" },
         h("div", null, h("h2", { style: { margin: "0 0 4px", fontSize: 17 } }, props.title || "视频字幕"),
-          h("p", { className: "vsub-muted" }, props.subtitle || "取视频字幕：B站 要登录一次，别的站要先装一次下载器。")),
+          h("p", { className: "vsub-muted" }, props.subtitle || "取视频字幕：B站 要登录一次，别的站要先装一次下载器 yt-dlp。")),
 
         error ? h("p", { className: "vsub-muted", style: { color: "#dc2626" } }, error) : null,
         expiredBar,
@@ -500,13 +500,15 @@ window.__ModuleLoader__.load({
         ),
 
         // 4. B站 以外的站要用的那个现成下载器（YouTube 这类站靠它取字幕和声音）
+        // 名字直接写 yt-dlp：这是个开源又常见的工具，写明名字方便人自己查、自己认，
+        // 藏着不说只会让人猜「这个小程序到底是什么东西」
         h(
           "div",
           { className: "vsub-card" },
           h(
             "div",
             { className: "vsub-row" },
-            h("h3", null, "B站 以外的站用的下载器"),
+            h("h3", null, "下载器 yt-dlp"),
             h("span", { className: "vsub-badge " + (ytdlpReady ? "ok" : "bad") }, ytdlpReady ? "装好了" : "还缺东西"),
             h("span", { style: { flex: 1 } }),
             ytdlpRunning
@@ -515,8 +517,8 @@ window.__ModuleLoader__.load({
           ),
           h("p", { className: "vsub-muted" },
             ytdlpReady
-              ? "B站 以外的视频站靠这个小程序去取字幕和声音。装好之后，把别的站的视频链接发进来就能用，取字幕的方式和 B站 一样。"
-              : "YouTube 这类 B站 以外的视频站，要装一个小程序才能取字幕和声音，大约十几兆，点上面的一键安装就行。不装也不影响 B站 那些视频。"),
+              ? "yt-dlp 是一个免费、开源的小程序，B站 以外的视频站靠它去取字幕和声音。装好之后，把别的站的视频链接发进来就能用，取字幕的方式和 B站 一样。"
+              : "YouTube 这类 B站 以外的视频站，要装一个叫 yt-dlp 的免费小程序才能取字幕和声音，大约十几兆，点上面的一键安装就行。不装也不影响 B站 那些视频。"),
           ytdlpSteps.length
             ? h("ul", { className: "vsub-muted", style: { margin: "4px 0 0", paddingLeft: 20 } },
                 ytdlpSteps.map((s) => h("li", { key: s.id },

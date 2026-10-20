@@ -106,7 +106,7 @@ const SYSTEM_PROMPT = [
   "【批量】subtitle_batch(urls, parts, lang, dir, force, max_items)：一次取多条。urls 给数组或一整段粘贴的文本（换行/逗号分隔都行）；parts=true 时先把合集的分P全部展开再逐个取，适合多集课程/连续剧。某一条失败不影响其它条，每条都有独立结果；条数超上限时如实告诉你还剩几条没取。",
   "【整理】subtitle_polish(path, dir, max_gap, max_chars)：把取回来的 .srt 拼回通顺句子并补标点，另写一份纯文稿 .txt。只做拼接和插入标点，一个原字都不改、不译、不删。B站 官方 AI 字幕是逐句短碎片、完全没有标点，要给人读或做总结就先用它整理一遍。",
   "provider 顺序默认 native→ytdlp→whisper→local，在 profile 的 cordis.patch.yml 里可改。",
-  "ytdlp 是「站上现成字幕」：B站 上它自己跳过（B站 走官方接口更快更全），别的站先问站上有没有现成字幕轨，人工优先、站上自动生成的其次，要的语种没有就取视频原文语种那条。下载器没装时它报 DOWNLOADER_MISSING，这时让用户到「设置 → 视频字幕」页的「B站 以外的站用的下载器」卡片点一键安装，不要说视频没有字幕。",
+  "ytdlp 是「站上现成字幕」，靠的下载器叫 yt-dlp（免费开源的小程序，用户可以自己查）：B站 上它自己跳过（B站 走官方接口更快更全），别的站先问站上有没有现成字幕轨，人工优先、站上自动生成的其次，要的语种没有就取视频原文语种那条。下载器没装或起不来时它报 DOWNLOADER_MISSING，这时让用户到「设置 → 视频字幕」页的「下载器 yt-dlp」卡片点一键安装或重新检查，不要说视频没有字幕。",
   "native 是主力源：B站 官方 AI 字幕轨要「已登录 + WBI 签名」才会返回地址，匿名拿不到。插件自动读本机已有登录凭据（biliCredentialFile 或 biliCookie），通常在 1 秒内返回。拿不到时先看 subtitle_providers 里 native 那行写的凭据状态，不要去猜视频没有字幕。",
   "whisper 是用 Whisper 引擎在本机转字幕，任何有声音的视频都能转但慢（约每分钟音频 8 秒），没有次数限制；它转的是整段音频，结果标记为完整。",
   "local 是用 SenseVoice 引擎在本机转字幕，和 whisper 是两个不同的引擎，通常比 whisper 快一倍左右、覆盖更全，但断句更碎、个别视频会漏句。它需要三样零件（FFmpeg、SenseVoice 模型、模型词表，共约 260MB），在设置里的「视频字幕」页点一键安装就能装齐，不需要 Python。装好前它在 subtitle_providers 里会显示为可选、缺件；缺件时如实告诉用户去设置页装，不要因此说视频没有字幕。",

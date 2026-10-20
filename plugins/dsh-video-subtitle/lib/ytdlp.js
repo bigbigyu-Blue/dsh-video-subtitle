@@ -155,7 +155,7 @@ export function classifyError(text) {
   if (SELF_PATTERNS.some((re) => re.test(raw))) {
     return {
       code: "DOWNLOADER_MISSING",
-      detail: "下载器在这台机器上没能启动（不是网址的问题）。到「设置 → 视频字幕」页的「B站 以外的站用的下载器」那张卡片上点「重新检查」，还是不行就点「一键安装」重装一次。下载器原话：" + detail,
+      detail: "下载器 yt-dlp 在这台机器上没能启动（不是网址的问题）。到「设置 → 视频字幕」页的「下载器 yt-dlp」那张卡片上点「重新检查」，还是不行就点「一键安装」重装一次。yt-dlp 原话：" + detail,
     };
   }
   const hit =

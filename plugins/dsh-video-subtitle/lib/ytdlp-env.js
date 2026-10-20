@@ -100,13 +100,14 @@ export function ytdlpStatus(cfg = {}, { home } = {}) {
   const size = sizeOnDisk(p.exe);
   const present = size >= MIN_BYTES;
   const version = readVersion(path.join(p.root, "version.txt"));
+  // 状态话里带上名字：设置页与排障回执都显示这一句，不写名字就没人知道装的是什么
   let detail;
   if (present) {
-    detail = version ? "已经装好，版本 " + version : "已经装好，可以用";
+    detail = version ? "yt-dlp 已经装好，版本 " + version : "yt-dlp 已经装好，可以用";
   } else if (size < 0) {
-    detail = "还没装，点一键安装会自动下载";
+    detail = "yt-dlp 还没装，点一键安装会自动下载";
   } else {
-    detail = "文件只有 " + mbText(size) + " 兆，还没下完，点一键安装会接着下";
+    detail = "yt-dlp 文件只有 " + mbText(size) + " 兆，还没下完，点一键安装会接着下";
   }
   return { ready: present, exe: p.exe, present, bytes: size > 0 ? size : 0, version, detail };
 }

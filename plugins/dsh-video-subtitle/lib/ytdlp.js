@@ -149,20 +149,21 @@ export function classifyError(text) {
   const raw = String(text ?? "");
   const detail = tailOf(raw);
   const pick = (patterns, code) => (patterns.some((re) => re.test(raw)) ? { code, detail } : null);
+  // 下载器自己起不来：归到「下载器不能用」那一条，不说成网址错或网络错。
+  // 错误码只有九类，这条原来只表示「还没装」，现在一并表示「装了但起不来」，
+  // 两种的处理办法都是回设置页那张卡片上重新检查或重装。
+  if (SELF_PATTERNS.some((re) => re.test(raw))) {
+    return {
+      code: "DOWNLOADER_MISSING",
+      detail: "下载器在这台机器上没能启动（不是网址的问题）。到「设置 → 视频字幕」页的「B站 以外的站用的下载器」那张卡片上点「重新检查」，还是不行就点「一键安装」重装一次。下载器原话：" + detail,
+    };
+  }
   const hit =
-    pick(SELF_PATTERNS, "UNSUPPORTED") ??
     pick(UNSUPPORTED_PATTERNS, "UNSUPPORTED_SITE") ??
     pick(NO_SUBTITLE_PATTERNS, "NO_SUBTITLE") ??
     pick(LOGIN_PATTERNS, "UNSUPPORTED_SITE") ??
     pick(NETWORK_PATTERNS, "NETWORK");
   if (!hit) return { code: "NETWORK", detail: "连不上这个站。" + detail };
-  // 下载器自己起不来：说清是它的问题，并给出能动手的一步
-  if (hit.code === "UNSUPPORTED" && SELF_PATTERNS.some((re) => re.test(raw))) {
-    return {
-      code: "UNSUPPORTED",
-      detail: "下载器没能启动，不是网址的问题。到「设置 → 视频字幕」页的「B站 以外的站用的下载器」那张卡片上，先点「取消安装」再点「重新检查」；还是不行就点「一键安装」重装一次。下载器原话：" + detail,
-    };
-  }
   // 要登录才给看：错误码只有四类，归到「网址不支持」，但话要说清是「要登录」
   if (hit.code === "UNSUPPORTED_SITE" && LOGIN_PATTERNS.some((re) => re.test(raw)) && !UNSUPPORTED_PATTERNS.some((re) => re.test(raw))) {
     return { code: "UNSUPPORTED_SITE", detail: "这个站要登录才给看，这里不替你登录。下载器原话：" + detail };

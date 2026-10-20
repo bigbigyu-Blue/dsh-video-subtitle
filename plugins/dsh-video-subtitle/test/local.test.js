@@ -48,12 +48,19 @@ test("等子进程期间事件循环没有被卡住", async () => {
 });
 
 test("两个子进程并行，总耗时不叠加", async () => {
+  // 不跟写死的毫秒数比：这台机器忙的时候，连起来一个 node 子进程本身就要好几百毫秒，
+  // 写死的上限会在整套测试一起跑时偶然不过。改成先量一个的耗时，再看两个一起跑是不是接近两倍。
+  const one = async () => {
+    const t = Date.now();
+    await runProcess(node, ["-e", "setTimeout(()=>{}, 1200)"], { timeoutMs: 20000 });
+    return Date.now() - t;
+  };
+  const single = await one();
   const t0 = Date.now();
-  await Promise.all([
-    runProcess(node, ["-e", "setTimeout(()=>{}, 1200)"], { timeoutMs: 20000 }),
-    runProcess(node, ["-e", "setTimeout(()=>{}, 1200)"], { timeoutMs: 20000 }),
-  ]);
-  assert.ok(Date.now() - t0 < 2300, "并行跑两个不该花两倍时间");
+  await Promise.all([one(), one()]);
+  const both = Date.now() - t0;
+  // 真串起来的话两个就要两倍左右；留出进程启动与机器繁忙的浮动
+  assert.ok(both < single * 1.8, `并行跑两个花了 ${both} 毫秒，单个才 ${single} 毫秒，看着像串起来跑了`);
 });
 
 test("可用性检查：缺什么就列什么，全都有就说能用", () => {

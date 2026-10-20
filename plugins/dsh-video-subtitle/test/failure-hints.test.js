@@ -1,7 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { failureHints } from "../lib/pipeline.js";
+
+// 临时目录建在仓库里，不建在系统临时目录：这台机器的命令行进程没有系统临时目录的写权限
+const TEST_ROOT = fileURLToPath(new URL(".", import.meta.url));
+const TMP_BASE = path.join(TEST_ROOT, ".tmp-hints");
 
 const noCred = { biliCookie: "", biliCredentialFile: path.join("C:", "definitely", "not", "here", "cred.json") };
 
@@ -14,12 +20,26 @@ test("没有登录凭据时，第一句就让人去扫码", () => {
   assert.match(hints[0], /设置/);
 });
 
-test("下载器自己起不来时，让人去重装下载器，不说成网络问题", () => {
-  // 这句要是答成「网络出岔子」，人会一直重试一条其实没问题的网
-  const hints = failureHints([T("ytdlp", "UNSUPPORTED", "下载器没能启动，不是网址的问题")], {});
-  assert.equal(hints.length >= 1, true);
-  assert.match(hints[0], /下载器/);
-  assert.doesNotMatch(hints[0], /网络/);
+test("下载器装好了却起不来时，让人去重新检查或重装，不说成网络问题", () => {
+  // 这句要是答成「网络出岔子」，人会一直重试一条其实没问题的网；
+  // 答成「还没装」也不行，明明装好了会让人以为装失败了
+  // 造一个真的存在、但不可能是真下载器的文件：体检只看得见「装过」，启动当然失败
+  mkdirSync(TMP_BASE, { recursive: true });
+  const dir = mkdtempSync(path.join(TMP_BASE, "hint-"));
+  const fakeExe = path.join(dir, "yt-dlp.exe");
+  // 体检只认「大于五兆」的文件，写得小一点会被当成没装
+  writeFileSync(fakeExe, Buffer.alloc(6 * 1024 * 1024, 0));
+  try {
+    const hints = failureHints([T("ytdlp", "DOWNLOADER_MISSING", "下载器在这台机器上没能启动")], { ytdlpPath: fakeExe });
+    assert.equal(hints.length >= 1, true);
+    assert.match(hints[0], /下载器/);
+    assert.match(hints[0], /重新检查|重装/);
+    assert.doesNotMatch(hints[0], /没装。/);
+    assert.doesNotMatch(hints[0], /网络/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(TMP_BASE, { recursive: true, force: true });
+  }
 });
 
 test("登录过期时说的是重新扫码，而不是第一次登录", () => {

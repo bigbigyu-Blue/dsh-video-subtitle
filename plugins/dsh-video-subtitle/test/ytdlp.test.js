@@ -197,10 +197,12 @@ test("classifyError：每种错误都说一句中文，后面才跟下载器原�
 
 test("classifyError：下载器建不了临时目录时，别说成网络故障", () => {
   // 这台机器上真发生过：临时目录写不进去，下载器直接退出，原文只有一行 PYI 报错。
-  // 归成网络问题会让人一直重试一条其实没问题的网。
+  // 归成网络问题会让人一直重试一条其实没问题的网；归成网址问题也白搭。
   const r = classifyError("[PYI-15480:ERROR] Could not create temporary directory!");
-  assert.notEqual(r.code, "NETWORK");
-  assert.match(r.detail, /临时目录|下载器/, r.detail);
+  assert.equal(r.code, "DOWNLOADER_MISSING");
+  assert.match(r.detail, /下载器/);
+  assert.match(r.detail, /设置/);
+  assert.match(r.detail, /重新检查|重装/);
 });
 
 test("classifyError：没字幕认成 NO_SUBTITLE", () => {

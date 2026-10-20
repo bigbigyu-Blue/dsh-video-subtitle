@@ -23,7 +23,7 @@ test("登录过期时说的是重新扫码，而不是第一次登录", () => {
 
 test("本机转写跑挂时指向一键装转写环境", () => {
   const hints = failureHints([T("whisper", "LOCAL_ASR_FAILED", "写不出结果文件")], {});
-  assert.ok(hints.some((h) => /一键安装转写环境/.test(h)), hints.join(" / "));
+  assert.ok(hints.some((h) => /Whisper 语音转字幕/.test(h) && /一键安装/.test(h)), hints.join(" / "));
 });
 
 test("只给试看片段时说要先登录", () => {

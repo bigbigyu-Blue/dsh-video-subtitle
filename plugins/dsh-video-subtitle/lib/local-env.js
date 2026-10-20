@@ -49,9 +49,9 @@ const MB = 1000 * 1000;
 
 /** 安装的四个步骤，顺序固定。 */
 const STEPS = [
-  { id: "ffmpeg", label: "准备从视频里抽声音的工具" },
-  { id: "model", label: "下载语音识别模型" },
-  { id: "tokens", label: "下载模型词表" },
+  { id: "ffmpeg", label: "FFmpeg（从视频里抽出声音）" },
+  { id: "model", label: "下载 SenseVoice 模型" },
+  { id: "tokens", label: "下载 SenseVoice 模型词表" },
   { id: "verify", label: "复查能不能用" },
 ];
 
@@ -61,9 +61,9 @@ const STEPS = [
  * missing 是缺这一样时给用户看的人话。
  */
 const ITEMS = [
-  { id: "ffmpeg", label: "从视频里抽声音的工具", bytes: FFMPEG_EXPECTED_BYTES, missing: "从视频里抽声音的工具" },
-  { id: "model", label: "语音识别模型", bytes: MODEL_BYTES, missing: "语音识别模型（约 239 兆）" },
-  { id: "tokens", label: "模型词表", bytes: TOKENS_BYTES, missing: "模型词表" },
+  { id: "ffmpeg", label: "FFmpeg（从视频里抽出声音）", bytes: FFMPEG_EXPECTED_BYTES, missing: "FFmpeg（从视频里抽出声音）" },
+  { id: "model", label: "SenseVoice 模型", bytes: MODEL_BYTES, missing: "SenseVoice 模型（约 239 兆）" },
+  { id: "tokens", label: "SenseVoice 模型词表", bytes: TOKENS_BYTES, missing: "SenseVoice 模型词表" },
 ];
 
 /** DSH 的家目录：优先听环境变量，没有就用用户目录下的 .dsh。 */
@@ -758,15 +758,15 @@ async function runSetup(taskId, cfg, { fetchImpl, home, token, signal }) {
           "复查没通过：" + bad.map((it) => it.missing).join("、") + " 还没到位，重新点一次一键安装会补齐",
         );
       }
-      s.detail = "三样都齐了，可以开始识别";
-      say("三样都齐了，可以开始识别");
+      s.detail = "三样都齐了，可以用了";
+      say("三样都齐了，可以用了");
     });
 
     state.running = false;
     state.ok = true;
     state.currentStep = null;
     state.finishedAt = Date.now();
-    say("本机识别环境装好了，可以用了");
+    say("SenseVoice 语音转字幕装好了，可以用了");
   } catch (e) {
     if (token.cancelled) {
       if (state.taskId === taskId && state.running) {

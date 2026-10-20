@@ -300,9 +300,9 @@ export function failureHints(attempts, cfg = {}) {
   }
 
   if (has("LOCAL_ASR_FAILED")) {
-    add("本机转写没有跑成。打开「设置 → 视频字幕」，点「一键安装转写环境」装好，再点一次取字幕。");
+    add("Whisper 语音转字幕没有跑成。打开「设置 → 视频字幕」，看「Whisper 语音转字幕」那张卡片：缺东西就点「一键安装」，装好了就点「重新检查」，然后再取一次。");
   } else if (tried("whisper") && isReady("whisper", cfg) === false) {
-    add("本机转写还没装好。打开「设置 → 视频字幕」，点「一键安装转写环境」，装完再取一次。");
+    add("Whisper 语音转字幕还没装好。打开「设置 → 视频字幕」，看「Whisper 语音转字幕」那张卡片：缺东西就点「一键安装」，装完再取一次。");
   }
 
   if (has("AUDIO_TRUNCATED")) {
@@ -642,8 +642,8 @@ export function providersStatus(cfg = {}) {
           missing = av.missing;
           // local 是可选的第四条路：官方字幕加本机转写已经够用，它缺件不算故障，别让它红着吓人。
           placeholder = pid === "local"
-            ? `需要额外安装，默认不用（缺 ${av.missing.join("、")}）`
-            : `未就绪：缺少${av.missing.join("、")}`;
+            ? `还没装好（缺 ${av.missing.join("、")}），这条可选，不装也能用别的来源`
+            : `还没装好：缺 ${av.missing.join("、")}`;
         }
       } catch (e) {
         placeholder = `可用性检查失败：${e?.message ?? e}`;

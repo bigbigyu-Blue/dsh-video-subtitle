@@ -3,7 +3,7 @@
  *
  * 普通用户不该去翻配置文件，更不该自己去浏览器里抠 Cookie。这个页面做三件事：
  *   1. 点一下出二维码，手机 B站 扫一下就登录好了；
- *   2. 本机转写环境缺什么，一键装；
+ *   2. Whisper 与 SenseVoice 两条本机路线各自缺什么，一键装；
  *   3. 常用的几项设置直接在这里改，改完立刻生效。
  *
  * 这是一个手写的客户端模块，不经过打包工具。工厂函数里只能同步拿到宿主预置的 react，
@@ -22,7 +22,7 @@ window.__ModuleLoader__.load({
     const zh = {
       nav: "视频字幕",
       title: "视频字幕",
-      subtitle: "取 B站 视频字幕：官方字幕要登录，登录一次就好。",
+      subtitle: "取 B站 视频字幕：B站官方字幕要登录，登录一次就好。",
     };
     const en = {
       nav: "Video subtitles",
@@ -339,9 +339,10 @@ window.__ModuleLoader__.load({
       const asrSteps = (asr && asr.steps) || (status && status.asr && status.asr.steps) || [];
 
       // 来源的名字写成中文，第四路是可选的，别让人以为哪里坏了
-      const sourceName = (id) => ({ native: "官方字幕", feiyudo: "第三方字幕站", whisper: "本机转写", local: "本机识别（可选）" })[id] || id;
+      // 名字必须让人一眼看出这是两个不同的引擎，不是同一个功能说两遍
+      const sourceName = (id) => ({ native: "B站官方字幕", whisper: "Whisper 语音转字幕", local: "SenseVoice 语音转字幕" })[id] || id;
 
-      // 下一步该做什么：没登录就先登录，登录了再看转写环境。做到的卡片高亮，用户从上往下点不会点错。
+      // 下一步该做什么：没登录就先登录，登录了再看 Whisper 那套装没装好。做到的卡片高亮，用户从上往下点不会点错。
       const nextStep = !login ? "" : !login.loggedIn ? "login" : !asrReady ? "asr" : "done";
       const cardCls = (key) => "vsub-card" + (nextStep === key ? " next" : "");
       const nextTag = (key) => (nextStep === key ? h("span", { className: "vsub-next" }, "先做这个") : null);
@@ -359,7 +360,7 @@ window.__ModuleLoader__.load({
         "div",
         { className: "vsub-root" },
         h("div", null, h("h2", { style: { margin: "0 0 4px", fontSize: 17 } }, props.title || "视频字幕"),
-          h("p", { className: "vsub-muted" }, props.subtitle || "取 B站 视频字幕：官方字幕要登录，登录一次就好。")),
+          h("p", { className: "vsub-muted" }, props.subtitle || "取 B站 视频字幕：B站官方字幕要登录，登录一次就好。")),
 
         error ? h("p", { className: "vsub-muted", style: { color: "#dc2626" } }, error) : null,
         expiredBar,
@@ -386,23 +387,23 @@ window.__ModuleLoader__.load({
           ),
           h("p", { className: "vsub-muted" },
             login && login.loggedIn
-              ? "登录后能拿到官方 AI 字幕，通常是秒级返回，而且不用本机转写，又快又准。"
+              ? "登录后能拿到 B站 官方 AI 字幕，通常一秒内返回，又快又准，不用本机自己算。"
               : "不登录也能取到一部分公开字幕，但官方 AI 字幕必须登录。点上面的按钮，用手机 B站 扫一下就成。"),
           // 失效的情况上面那条提醒已经说清了，这里不再重复一遍
           login && !login.loggedIn && !login.expired && login.detail ? h("p", { className: "vsub-muted", style: { fontSize: 12 } }, login.detail) : null,
           loginTip ? h("p", { className: "vsub-muted", style: { fontSize: 12, color: "#0f766e" } }, loginTip) : null,
         ),
 
-        // 2. 转写环境
+        // 2. Whisper 语音转字幕
         h(
           "div",
           { className: cardCls("asr") },
           h(
             "div",
             { className: "vsub-row" },
-            h("h3", null, "本机转写"),
+            h("h3", null, "Whisper 语音转字幕"),
             nextTag("asr"),
-            h("span", { className: "vsub-badge " + (asrReady ? "ok" : "bad") }, asrReady ? "已就绪" : "缺东西"),
+            h("span", { className: "vsub-badge " + (asrReady ? "ok" : "bad") }, asrReady ? "装好了" : "还缺东西"),
             h("span", { style: { flex: 1 } }),
             running
               ? h("button", { className: "vsub-btn", onClick: cancelSetup }, "取消安装")
@@ -410,8 +411,8 @@ window.__ModuleLoader__.load({
           ),
           h("p", { className: "vsub-muted" },
             asrReady
-              ? "没有官方字幕的视频会自动用本机转写兜住，占的是自己的电脑，不限次数，30 分钟的视频大约两三分钟。"
-              : "没有官方字幕的视频要靠本机转写兜住。现在缺零件，点上面的一键安装，装完就能用。"),
+              ? "用 Whisper 在这台电脑上听声音写字幕。不联网、不限次数，30 分钟的视频大约两三分钟。句子比较完整，偶尔认错字。"
+              : "用 Whisper 在这台电脑上听声音写字幕。要先装一次：Python 运行环境、Whisper 程序、Whisper 模型，点上面的一键安装就能装齐。"),
           asrSteps.length
             ? h("ul", { className: "vsub-muted", style: { margin: "4px 0 0", paddingLeft: 20 } },
                 asrSteps.map((s) => h("li", { key: s.id },
@@ -422,15 +423,15 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
-        // 3. 本机识别（可选的那条快路线）
+        // 3. SenseVoice：另一套引擎，比 Whisper 快，可选的第二条本机路线
         h(
           "div",
           { className: cardCls("local") },
           h(
             "div",
             { className: "vsub-row" },
-            h("h3", null, "本机识别"),
-            h("span", { className: "vsub-badge " + (localReady ? "ok" : "bad") }, localReady ? "已就绪" : "缺东西"),
+            h("h3", null, "SenseVoice 语音转字幕"),
+            h("span", { className: "vsub-badge " + (localReady ? "ok" : "bad") }, localReady ? "装好了" : "还缺东西"),
             h("span", { style: { flex: 1 } }),
             localRunning
               ? h("button", { className: "vsub-btn", onClick: cancelLocalSetup }, "取消安装")
@@ -438,8 +439,8 @@ window.__ModuleLoader__.load({
           ),
           h("p", { className: "vsub-muted" },
             localReady
-              ? "这条路线在你自己的电脑上认字，不联网、不限次数，通常比本机转写快得多。它排在本机转写后面，两个都装好也不冲突。"
-              : "比本机转写快，但要多装三样东西（从视频里抽声音的工具、识别模型、模型词表，一共约二百六十兆）。点上面的一键安装，全程不用装别的软件。"),
+              ? "用 SenseVoice 在这台电脑上听声音写字幕，和上面那条是两套不同的引擎。不联网、不限次数，比 Whisper 快一倍多。句子切得碎，个别视频会漏几句话。"
+              : "用 SenseVoice 在这台电脑上听声音写字幕，比 Whisper 快一倍多。要先装三样东西：FFmpeg、SenseVoice 模型、模型词表，一共约二百六十兆，点上面的一键安装就能装齐，不用装 Python。"),
           localSteps.length
             ? h("ul", { className: "vsub-muted", style: { margin: "4px 0 0", paddingLeft: 20 } },
                 localSteps.map((s) => h("li", { key: s.id },
@@ -455,9 +456,9 @@ window.__ModuleLoader__.load({
         h(
           "div",
           { className: "vsub-card" },
-          h("div", { className: "vsub-row" }, h("h3", null, "字幕来源"), h("span", { style: { flex: 1 } }),
+          h("div", { className: "vsub-row" }, h("h3", null, "字幕从哪来"), h("span", { style: { flex: 1 } }),
             h("button", { className: "vsub-btn", onClick: load }, "刷新")),
-          h("p", { className: "vsub-muted" }, "按顺序试，前一个拿不到才轮到下一个。"),
+          h("p", { className: "vsub-muted" }, "从上往下挨个试，哪个先拿到就用哪个。"),
           h("ul", { className: "vsub-muted", style: { margin: 0, paddingLeft: 20 } },
             ((status && status.providers) || []).map((p) => h("li", { key: p.provider, style: p.optional ? { opacity: 0.6 } : null },
               sourceName(p.provider) + (p.wired ? "" : "（未接线）") + "：" +
@@ -490,13 +491,16 @@ window.__ModuleLoader__.load({
                 h("span", null, "固定保存目录"),
                 h("input", { type: "text", placeholder: "例：D:\\我的字幕", value: textOf(valueOf("saveDir")), onChange: (e) => setField("saveDir", e.target.value) })),
 
+          // 这一项只管 Whisper 那一条，选项上直接写多大、要付什么代价，别让人猜「推荐」是啥意思
           h("label", { className: "vsub-field" },
-            h("span", null, "转写模型"),
+            h("span", null, "Whisper 用多大的模型"),
             h("select", { value: textOf(valueOf("whisperModel"), "small"), onChange: (e) => setField("whisperModel", e.target.value) },
-              h("option", { value: "tiny" }, "最快（准确率低一些）"),
-              h("option", { value: "base" }, "快"),
-              h("option", { value: "small" }, "推荐"),
-              h("option", { value: "medium" }, "最准（慢，占内存多）"))),
+              h("option", { value: "tiny" }, "最小（75 兆，最快也最不准）"),
+              h("option", { value: "base" }, "小（141 兆）"),
+              h("option", { value: "small" }, "中（465 兆，默认）"),
+              h("option", { value: "medium" }, "大（1.5 吉字节，最准也最慢）"))),
+          h("p", { className: "vsub-muted", style: { fontSize: 12, marginTop: -4 } },
+            "换一个要重新下载一次，没下载好之前 Whisper 这条路用不了。这一项不影响上面 SenseVoice 那条。"),
 
           h("label", { className: "vsub-field" },
             h("span", null, "缓存保留天数"),

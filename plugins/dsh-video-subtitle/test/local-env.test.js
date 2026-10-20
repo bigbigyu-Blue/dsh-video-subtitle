@@ -215,9 +215,9 @@ test("localStatus：三样都没有时报缺，缺什么写得清楚", () => {
   assert.equal(st.ready, false);
   assert.equal(st.items.length, 3);
   assert.deepEqual(st.items.map((x) => x.id), ["ffmpeg", "model", "tokens"]);
-  assert.deepEqual(st.items.map((x) => x.label), ["从视频里抽声音的工具", "语音识别模型", "模型词表"]);
+  assert.deepEqual(st.items.map((x) => x.label), ["FFmpeg（从视频里抽出声音）", "SenseVoice 模型", "SenseVoice 模型词表"]);
   assert.ok(st.items.every((x) => x.present === false));
-  assert.deepEqual(st.missing, ["从视频里抽声音的工具", "语音识别模型（约 239 兆）", "模型词表"]);
+  assert.deepEqual(st.missing, ["FFmpeg（从视频里抽出声音）", "SenseVoice 模型（约 239 兆）", "SenseVoice 模型词表"]);
   assert.equal(st.root, path.join(home, "video-subtitle", "local"));
 });
 
@@ -234,7 +234,7 @@ test("localStatus：文件在但只有一小截，不算有", async () => {
   assert.equal(model.present, false);
   assert.equal(tokens.present, false);
   assert.match(model.detail, /还没下完/);
-  assert.deepEqual(st.missing, ["从视频里抽声音的工具", "语音识别模型（约 239 兆）", "模型词表"]);
+  assert.deepEqual(st.missing, ["FFmpeg（从视频里抽出声音）", "SenseVoice 模型（约 239 兆）", "SenseVoice 模型词表"]);
 });
 
 test("localStatus：三样都够大才说能用", async () => {
@@ -475,9 +475,9 @@ test("任务状态：四个步骤的 id 和中文名字都是固定的", async (
   assert.equal(st.ok, true, st.error || "");
   assert.deepEqual(st.steps.map((s) => s.id), ["ffmpeg", "model", "tokens", "verify"]);
   assert.deepEqual(st.steps.map((s) => s.label), [
-    "准备从视频里抽声音的工具",
-    "下载语音识别模型",
-    "下载模型词表",
+    "FFmpeg（从视频里抽出声音）",
+    "下载 SenseVoice 模型",
+    "下载 SenseVoice 模型词表",
     "复查能不能用",
   ]);
   for (const s of st.steps) {

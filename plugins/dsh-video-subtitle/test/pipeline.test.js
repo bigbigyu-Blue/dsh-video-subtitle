@@ -40,7 +40,7 @@ test("状态清单含三个源，本地源缺件时如实列出来", () => {
   const local = list.find((x) => x.provider === "local");
   assert.equal(local.wired, true);
   assert.ok(Array.isArray(local.missing) && local.missing.length >= 1, "缺件必须列出来");
-  assert.match(local.placeholder, /^需要额外安装，默认不用/);
+  assert.match(local.placeholder, /^还没装好（缺 /);
   assert.doesNotMatch(local.placeholder, /占位返回|缺 AAC 解码/, "过期说法必须去掉");
   // 这条来源是可选的：缺件不算故障，界面上不该显示成红的
   assert.equal(local.optional, true);

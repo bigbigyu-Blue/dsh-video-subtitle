@@ -32,10 +32,10 @@ const PIP_MIRROR = ["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"];
 const HF_MIRROR = "https://hf-mirror.com";
 /** 装环境的四步，顺序固定。 */
 const STEPS = [
-  { id: "build-venv", label: "准备 Python 虚拟环境" },
-  { id: "pip", label: "安装 faster-whisper" },
-  { id: "model", label: "下载语音模型" },
-  { id: "verify", label: "复查环境能不能用" },
+  { id: "build-venv", label: "准备 Python 运行环境" },
+  { id: "pip", label: "安装 Whisper 程序（faster-whisper）" },
+  { id: "model", label: "下载 Whisper 模型" },
+  { id: "verify", label: "复查能不能用" },
 ];
 const VENV_TIMEOUT = 10 * 60 * 1000;
 const PIP_TIMEOUT = 30 * 60 * 1000;
@@ -176,7 +176,7 @@ export async function asrStatus(cfg = {}, { home, run } = {}) {
       pythonDetail = "Python 解释器在，但启动就报错：" + (lastLine(r.stderr) || "退出码 " + r.code) + "，这个环境得重装";
     }
   }
-  steps.push({ id: "python", label: "Python 解释器", done: pythonOk, detail: pythonDetail });
+  steps.push({ id: "python", label: "Python 运行环境", done: pythonOk, detail: pythonDetail });
 
   // 第二步：faster-whisper 这个包在不在
   let packageOk = false;
@@ -193,13 +193,13 @@ export async function asrStatus(cfg = {}, { home, run } = {}) {
       packageDetail = "这个 Python 里没有能用的 faster-whisper：" + (lastLine(r.stderr) || "退出码 " + r.code) + "，点一键安装补上";
     }
   }
-  steps.push({ id: "package", label: "transcribe 依赖（faster-whisper）", done: packageOk, detail: packageDetail });
+  steps.push({ id: "package", label: "Whisper 程序（faster-whisper）", done: packageOk, detail: packageDetail });
 
   // 第三步：模型文件在不在
   const foundModel = modelDirs(p).find((dir) => existsSync(dir));
   steps.push({
     id: "model",
-    label: "语音模型 " + p.modelName,
+    label: "Whisper 模型 " + p.modelName,
     done: Boolean(foundModel),
     detail: foundModel
       ? "模型已经下好，放在 " + foundModel
@@ -210,7 +210,7 @@ export async function asrStatus(cfg = {}, { home, run } = {}) {
   const tmpOk = existsSync(p.tmpRoot);
   steps.push({
     id: "tmp",
-    label: "临时目录",
+    label: "临时文件夹",
     done: tmpOk,
     detail: tmpOk ? "临时目录可以用：" + p.tmpRoot : "临时目录还不存在：" + p.tmpRoot + "，开始转写时会自动创建，不影响使用",
   });
@@ -674,11 +674,11 @@ async function runSetup(taskId, cfg, options) {
         "from huggingface_hub import snapshot_download",
         'print(snapshot_download("Systran/faster-whisper-" + sys.argv[1]))',
       ].join("\n");
-      say("下载语音模型 " + paths.modelName + " 到 " + paths.hfHome + "（走 " + HF_MIRROR + " 镜像）");
+      say("下载 Whisper 模型 " + paths.modelName + " 到 " + paths.hfHome + "（走 " + HF_MIRROR + " 镜像）");
       await exec(paths.python, ["-c", script, paths.modelName], {
         env: { HF_HOME: paths.hfHome, HF_ENDPOINT: HF_MIRROR, HF_HUB_DISABLE_XET: "1" },
         timeoutMs: MODEL_TIMEOUT,
-        label: "下载语音模型",
+        label: "下载 Whisper 模型",
       });
       const dir = modelDirs(paths).find((d) => existsSync(d));
       if (!dir) {
@@ -703,7 +703,7 @@ async function runSetup(taskId, cfg, options) {
     state.ok = true;
     state.currentStep = null;
     state.finishedAt = Date.now();
-    say("整套转写环境装好了，可以用了");
+    say("Whisper 语音转字幕装好了，可以用了");
   } catch (e) {
     if (taskCancelled) {
       if (state.taskId === taskId && state.running) {
@@ -730,7 +730,7 @@ async function runSetup(taskId, cfg, options) {
 export function installHint(cfg = {}) {
   const p = asrPaths(cfg);
   const lines = [
-    "本机转写要装这些东西，愿意自己动手就照下面来：",
+    "Whisper 语音转字幕要装这些东西，愿意自己动手就照下面来：",
     "",
     "1. 先装 Python 3.10 或更新的版本，安装时勾上「Add Python to PATH」（把 Python 加到 PATH）。",
     "   已经装过就跳过这步，用 py -3 或者 python 都能验证一下。",
@@ -743,7 +743,7 @@ export function installHint(cfg = {}) {
     '   "' + p.python + '" -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple',
     '   "' + p.python + '" -m pip install --upgrade faster-whisper -i https://pypi.tuna.tsinghua.edu.cn/simple',
     "",
-    "4. 下载语音模型。下载前先把这三个环境变量设好，否则国内多半下不动：",
+    "4. 下载 Whisper 模型。下载前先把这三个环境变量设好，否则国内多半下不动：",
     "   set HF_ENDPOINT=" + HF_MIRROR,
     "   set HF_HUB_DISABLE_XET=1",
     "   set HF_HOME=" + p.hfHome,
@@ -751,7 +751,7 @@ export function installHint(cfg = {}) {
     "   HF_ENDPOINT 指定国内镜像站；HF_HUB_DISABLE_XET=1 关掉新版传输方式，老版本库不认它也不会报错；",
     "   HF_HOME 决定模型缓存落到哪里，必须跟插件用的是同一个目录。",
     "",
-    "5. 弄完回到设置页点「检查环境」，四项都打勾就能开始转写。转写本身不需要联网。",
+    "5. 弄完回到设置页点「重新检查」，四项都打勾就能开始转写。转写本身不需要联网。",
     "",
     "插件认这三个配置项（写在插件配置里，都是可选的）：",
     "   whisperPython：Python 解释器的完整路径，默认就是上面那个虚拟环境里的 python.exe",

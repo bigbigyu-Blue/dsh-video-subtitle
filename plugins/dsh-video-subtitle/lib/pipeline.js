@@ -328,6 +328,8 @@ export function failureHints(attempts, cfg = {}) {
   // 别的站这条路没走通时先说清是哪一种，别让人误以为「视频没有字幕」
   if (hit("ytdlp", "DOWNLOADER_MISSING")) {
     add("别的站的视频要靠下载器才能取字幕和声音，现在还没装。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「一键安装」，装完再取一次。");
+  } else if (has("UNSUPPORTED")) {
+    add("下载器没能启动，不是这条视频的问题。打开「设置 → 视频字幕」，在「B站 以外的站用的下载器」那张卡片上点「重新检查」，还不行就点「一键安装」重装一次。");
   } else if (has("UNSUPPORTED_SITE")) {
     add("这个网址下载器不认识，或者这个站要登录才给看。换一条公开视频的完整网址试试；要登录的站这里不替你登录。");
   }
@@ -367,6 +369,27 @@ export function fetchTimeoutBudget(cfg = {}) {
 }
 
 /**
+ * 每次回执的前半段（平台、编号、标题、时长、落盘目录）。
+ *
+ * 这里每一样都必须落成 JSON 认得的实值：缺栏目一律写空串、时长缺了写 0。
+ * 留下 undefined 会让整份回执不是合法 JSON，宿主那一层判成「工具返回了坏数据」，
+ * 用户看到一段报错，其实字幕早就写进硬盘了（实测B站 那条路就是这样坏的）。
+ */
+export function resultHead(meta, dir, dirSource) {
+  return {
+    platform: meta.platform,
+    bvid: meta.bvid ?? "",
+    videoId: meta.videoId ?? "",
+    site: meta.site ?? "",
+    page: meta.page ?? 1,
+    title: meta.title ?? "",
+    durationS: meta.durationS ?? 0,
+    dir,
+    dirSource,
+  };
+}
+
+/**
  * 别的站的视频信息：标题、时长、原文语种都由下载器问出来。
  *
  * 问不到时如实失败，不编一个标题顶上；下载器没装时也不在这里报错，
@@ -390,9 +413,19 @@ async function resolveOtherSiteMeta(parsed, ctx) {
   try {
     info = await probeOtherSite({ url: parsed.raw, cfg: ctx.cfg, signal: ctx.signal });
   } catch (e) {
-    const err = ctx.error("ytdlp", e?.code ?? "NETWORK", e?.detail ?? e?.message ?? String(e));
-    err.metaUnavailable = true;
-    throw err;
+    // 问不到不等于整次调用炸掉：把原因随视频信息一起带下去，让来源链照常走完，
+    // 最后回一份带原因和「下一步」的失败结果。直接抛出去的话，用户只看到一段报错。
+    return {
+      bvid: "",
+      videoId: siteIdFromUrl(parsed.raw),
+      page: 1,
+      title: parsed.raw,
+      desc: "",
+      durationS: undefined,
+      language: "",
+      site: parsed.host ?? "",
+      metaError: { code: e?.code ?? "NETWORK", detail: e?.detail ?? e?.message ?? String(e) },
+    };
   }
   return {
     bvid: "",
@@ -447,17 +480,26 @@ async function subtitleFetchInner({ url, lang, dir, force = false, cfg = {}, sig
   const idText = meta.platform === "bilibili" ? meta.bvid : meta.videoId;
   const base = meta.page > 1 ? `${idText}-p${meta.page}` : idText;
 
-  const head = {
-    platform: meta.platform,
-    bvid: meta.bvid,
-    videoId: meta.videoId,
-    site: meta.site ?? "",
-    page: meta.page,
-    title: meta.title,
-    durationS: meta.durationS,
-    dir: outDir,
-    dirSource,
-  };
+  const head = resultHead(meta, outDir, dirSource);
+
+  // 视频信息都没问到（网址不认识、要登录才给看、连不上）：不再往下试来源，
+  // 直接把这一条原因和「下一步」交回去，用户看到的是能动手的话，不是一段报错
+  if (meta.metaError) {
+    const attempts = [{ provider: "ytdlp", result: meta.metaError.code, detail: meta.metaError.detail, ms: Date.now() - startedAt }];
+    recordAttempt("ytdlp", meta.metaError.code, meta.metaError.detail);
+    const hints = failureHints(attempts, cfg);
+    return {
+      ok: false,
+      cached: false,
+      source: null,
+      tracks: [],
+      attempts,
+      hints,
+      nextStep: hints[0] ?? "",
+      elapsedMs: Date.now() - startedAt,
+      ...head,
+    };
+  }
 
   if (!force) {
     // 顺手把本视频过期的旧件清掉，字幕目录不会只增不减

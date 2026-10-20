@@ -116,6 +116,17 @@ const NO_SUBTITLE_PATTERNS = [
   /no closed captions/i,
 ];
 
+/**
+ * 下载器自己起不来：这台机器上真的发生过，临时目录写不进去，它打一行 PYI 报错就退出。
+ * 这不是网络问题、也不是网址问题，得单独说清，否则人会一直重试一条其实没问题的网。
+ */
+const SELF_PATTERNS = [
+  /Could not create temporary directory/i,
+  /PYI-\d+:ERROR/i,
+  /Failed to execute script/i,
+  /No such file or directory.*yt-dlp/i,
+];
+
 /** 网络问题：连不上、超时、域名解析失败、服务端出错。 */
 const NETWORK_PATTERNS = [
   /timed out/i,
@@ -139,11 +150,19 @@ export function classifyError(text) {
   const detail = tailOf(raw);
   const pick = (patterns, code) => (patterns.some((re) => re.test(raw)) ? { code, detail } : null);
   const hit =
+    pick(SELF_PATTERNS, "UNSUPPORTED") ??
     pick(UNSUPPORTED_PATTERNS, "UNSUPPORTED_SITE") ??
     pick(NO_SUBTITLE_PATTERNS, "NO_SUBTITLE") ??
     pick(LOGIN_PATTERNS, "UNSUPPORTED_SITE") ??
     pick(NETWORK_PATTERNS, "NETWORK");
   if (!hit) return { code: "NETWORK", detail: "连不上这个站。" + detail };
+  // 下载器自己起不来：说清是它的问题，并给出能动手的一步
+  if (hit.code === "UNSUPPORTED" && SELF_PATTERNS.some((re) => re.test(raw))) {
+    return {
+      code: "UNSUPPORTED",
+      detail: "下载器没能启动，不是网址的问题。到「设置 → 视频字幕」页的「B站 以外的站用的下载器」那张卡片上，先点「取消安装」再点「重新检查」；还是不行就点「一键安装」重装一次。下载器原话：" + detail,
+    };
+  }
   // 要登录才给看：错误码只有四类，归到「网址不支持」，但话要说清是「要登录」
   if (hit.code === "UNSUPPORTED_SITE" && LOGIN_PATTERNS.some((re) => re.test(raw)) && !UNSUPPORTED_PATTERNS.some((re) => re.test(raw))) {
     return { code: "UNSUPPORTED_SITE", detail: "这个站要登录才给看，这里不替你登录。下载器原话：" + detail };

@@ -14,6 +14,14 @@ test("没有登录凭据时，第一句就让人去扫码", () => {
   assert.match(hints[0], /设置/);
 });
 
+test("下载器自己起不来时，让人去重装下载器，不说成网络问题", () => {
+  // 这句要是答成「网络出岔子」，人会一直重试一条其实没问题的网
+  const hints = failureHints([T("ytdlp", "UNSUPPORTED", "下载器没能启动，不是网址的问题")], {});
+  assert.equal(hints.length >= 1, true);
+  assert.match(hints[0], /下载器/);
+  assert.doesNotMatch(hints[0], /网络/);
+});
+
 test("登录过期时说的是重新扫码，而不是第一次登录", () => {
   const hints = failureHints([T("native", "CREDENTIAL_EXPIRED", "过期的凭据")], {});
   assert.match(hints[0], /过期/);

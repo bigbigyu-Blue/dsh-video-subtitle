@@ -66,6 +66,12 @@ if (url.includes("unsupported")) {
   process.exit(1);
 }
 
+// 这台机器上真出现过：下载器起不来，报「建不了临时目录」，被当成网络问题
+if (url.includes("notmpdir")) {
+  process.stderr.write("[PYI-15480:ERROR] Could not create temporary directory!\n");
+  process.exit(1);
+}
+
 const id = (url.match(/[A-Za-z0-9_-]{6,}/g) || ["abc123"])[0].slice(0, 11) || "abc123";
 
 if (args.includes("--dump-single-json")) {
@@ -187,6 +193,14 @@ test("classifyError：每种错误都说一句中文，后面才跟下载器原�
   assert.match(classifyError("ERROR: Unsupported URL: https://x/").detail, /认不出/);
   assert.match(classifyError("ERROR: HTTP Error 503: Service Unavailable").detail, /连不上/);
   assert.match(classifyError("WARNING: There are no subtitles for the requested languages").detail, /站上没有/);
+});
+
+test("classifyError：下载器建不了临时目录时，别说成网络故障", () => {
+  // 这台机器上真发生过：临时目录写不进去，下载器直接退出，原文只有一行 PYI 报错。
+  // 归成网络问题会让人一直重试一条其实没问题的网。
+  const r = classifyError("[PYI-15480:ERROR] Could not create temporary directory!");
+  assert.notEqual(r.code, "NETWORK");
+  assert.match(r.detail, /临时目录|下载器/, r.detail);
 });
 
 test("classifyError：没字幕认成 NO_SUBTITLE", () => {

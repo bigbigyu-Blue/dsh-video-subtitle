@@ -4,7 +4,43 @@ import os from "node:os";
 import path from "node:path";
 import { mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { PROVIDERS, fetchTimeoutBudget, providersStatus, subtitleFetch } from "../lib/pipeline.js";
+import { PROVIDERS, fetchTimeoutBudget, providersStatus, subtitleFetch, resultHead } from "../lib/pipeline.js";
+
+/** 整份回执必须是 JSON 认得的实值：留一个 undefined，宿主就判「返回了坏数据」。 */
+function assertLossless(value, label = "回执") {
+  const bad = [];
+  const scan = (node, where) => {
+    if (node === undefined) {
+      bad.push(where + " = undefined");
+      return;
+    }
+    if (typeof node === "number" && !Number.isFinite(node)) {
+      bad.push(where + " = " + node);
+      return;
+    }
+    if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) scan(v, where + "." + k);
+    }
+  };
+  scan(value, label);
+  assert.deepEqual(bad, [], "这些栏目不是合法 JSON：" + bad.join("、"));
+}
+
+test("回执前半段：缺的栏目一律落成空串或 0，不许留 undefined", () => {
+  // B站 那条路没有「站上编号」，时长偶发问不到；不留神就会把 undefined 塞进回执
+  const bili = resultHead({ platform: "bilibili", bvid: "BV1xx411c7mD", title: "标题", durationS: 213 }, "/tmp", "workspace");
+  assertLossless(bili);
+  assert.equal(bili.videoId, "");
+  assert.equal(bili.site, "");
+  assert.equal(JSON.stringify(bili).includes("undefined"), false);
+
+  const bare = resultHead({ platform: "youtube", videoId: "abc12345678" }, "/tmp", "arg");
+  assertLossless(bare, "别的站回执");
+  assert.equal(bare.bvid, "");
+  assert.equal(bare.title, "");
+  assert.equal(bare.durationS, 0);
+  assert.equal(bare.page, 1);
+});
 
 test("等待上限跟着源数量走，不写死", () => {
   // 预算只按实际启用的源数算：默认那套里有 whisper，所以另加一份转写时间

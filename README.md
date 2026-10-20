@@ -6,18 +6,18 @@ B站 走插件自己写的官方接口；别的视频站交给免费开源的下
 
 ## 安装
 
-现在只能从仓库装。在命令行里执行：
+在命令行里执行：
 
 ```
-dsh plugin --profile desktop add git+https://github.com/bigbigyu-Blue/dsh-video-subtitle.git
+dsh plugin --profile desktop add dsh-video-subtitle
 ```
 
 装完退出桌面应用再重开一次，设置里才会出现「视频字幕」这一页。
 
-发到 npm 之后改用这一条：
+也可以直接从仓库装，拿到的是最新一次提交：
 
 ```
-dsh plugin --profile desktop add dsh-video-subtitle
+dsh plugin --profile desktop add git+https://github.com/bigbigyu-Blue/dsh-video-subtitle.git
 ```
 
 ## 用起来
